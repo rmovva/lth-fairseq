@@ -1,3 +1,14 @@
+Running the standard NMT transformer model: https://github.com/pytorch/fairseq/blob/master/examples/scaling_nmt/README.md
+
+
+
+
+
+
+
+
+
+
 <p align="center">
   <img src="fairseq_logo.png" width="150">
   <br />
