@@ -4,6 +4,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -86,27 +87,161 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         }
         # fmt: on
 
+    @staticmethod
+    def to_mask_name(name, is_encoder):
+        if is_encoder: return 'encoder.' + name
+        return 'decoder.' + name
+
+    @staticmethod
+    def get_param_props(name):
+        # module: "encoder" or "decoder"
+        # type: "fc", "attention", "embedding", "layernorm", "output"
+        # layer: 0-5 (if not embedding or output)
+        # attention: "self", "enc_dec" (if attention)
+        # proj: "query", "key", "value", "out" (if attention)
+        # weightorbias: "weight", "bias" (if linear)
+        # fc_order: 1 or 2 (if fc)
+        split_name = name.split(".")
+        module = split_name[0]
+        if "layer_norm" in name:
+            return {
+                "type": "layernorm"
+            }
+
+        if "embed_tokens" in name:
+            return {
+                "module": module,
+                "type": "embedding"
+            }
+
+        layer = int(split_name[2])
+        if "attn" in name:
+            attention = "self"
+            if split_name[3] == "encoder_attn": attention = "enc_dec"
+
+            proj = "out_proj"
+            if split_name[4] == "k_proj": proj = "key"
+            elif split_name[4] == "q_proj": proj = "query"
+            elif split_name[4] == "v_proj": proj = "value"
+
+            weightorbias = split_name[5]
+            return {
+                "module": module,
+                "type": "attention",
+                "layer": layer,
+                "attention": attention,
+                "proj": proj,
+                "weightorbias": weightorbias
+            }
+
+        if "fc" in name:
+            order = 1
+            if split_name[3] == "fc2": order = 2
+
+            weightorbias = split_name[4]
+            return {
+                "module": module,
+                "type": "fc",
+                "layer": layer,
+                "weightorbias": weightorbias,
+                "fc_order": order
+            }
+
+        return None
+
+
+
+
     def __init__(self, args, encoder, decoder):
         super().__init__(encoder, decoder)
         self.args = args
         self.supports_align_args = True
-        self.get_encoder_tensor_names(encoder)
+        self.masks, self.param_properties = self.build_masks(encoder, decoder)
+        # param_properties[name]:
+            # module: "encoder" or "decoder"
+            # type: "fc", "attention", "embedding", "layernorm", "output"
+            # layer: 0-5 (if not embedding or output)
+            # attention: "enc_self", "enc_dec", "dec_self" (if attention)
+            # proj: "query", "key", "value", "out" (if attention)
+            # weight/bias: "weight", "bias" (if linear)
+            # fc_order: 1 or 2 (if fc)
 
-    def get_encoder_tensor_names(self, encoder):
-        for i, layer in enumerate(encoder.layers):
-            print(layer)
-            for j, (name, param) in enumerate(layer.named_parameters()):
-                print(name)
-            for (name, module) in layer.named_modules():
-                print(name)
-            break
-            # print("layer ", i)
-            # print(layer.self_attn.k_proj)
-            # print(layer.self_attn.v_proj)
-            # print(layer.self_attn.q_proj)
-        for i, (name, param) in enumerate(encoder.named_parameters()):
-            #print(name, isinstance())
-            pass
+        #self.prune_weights(.5)
+        #self.prune_weights(.5)
+        #self.prune_weights(.5)
+        
+    
+    def build_masks(self, encoder, decoder, prune_embeddings=False):
+        masks = {}
+        param_properties = {}
+        for name, param in encoder.named_parameters():
+            mask_name = PrunedTransformerModel.to_mask_name(name, True)
+            param_prop = PrunedTransformerModel.get_param_props(mask_name)
+            #print(mask_name, param_prop)
+            name_is_prunable = True
+            if param_prop["type"] == "layernorm": 
+                name_is_prunable = False
+            if not prune_embeddings and param_prop["type"] == "embedding":
+                name_is_prunable = False
+
+            if name_is_prunable:
+                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+                param_properties[mask_name] = param_prop
+
+        temp = set()
+        for name, param in decoder.named_parameters():
+            temp.add(name)
+            mask_name = PrunedTransformerModel.to_mask_name(name, False)
+            param_prop = PrunedTransformerModel.get_param_props(mask_name)
+            name_is_prunable = True
+            if param_prop["type"] == "layernorm": 
+                name_is_prunable = False
+            if not prune_embeddings and param_prop["type"] == "embedding":
+                name_is_prunable = False
+
+            if name_is_prunable:
+                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+                param_properties[mask_name] = param_prop
+
+        #print(decoder.output_projection)
+        return masks, param_properties
+
+    def apply_masks(self):
+        for name, param in self.encoder.named_parameters():
+            mask_name = PrunedTransformerModel.to_mask_name(name, True)
+            if mask_name in self.masks:
+                param.data *= self.masks[mask_name]
+        for name, param in self.decoder.named_parameters():
+            mask_name = PrunedTransformerModel.to_mask_name(name, False)
+            if mask_name in self.masks:
+                param.data *= self.masks[mask_name]
+    
+    def prune_weights(self, prune_frac):
+        current_mask = {name: self.masks[name].numpy() for name in self.masks}
+        n_remaining_weights = np.sum([np.sum(v) for v in current_mask.values()])
+        n_weights_to_prune = np.ceil(n_remaining_weights * prune_frac).astype(int)
+        #print(n_remaining_weights, n_weights_to_prune)
+
+        weights = {}
+        for name, param in self.encoder.named_parameters():
+            mask_name = PrunedTransformerModel.to_mask_name(name, True)
+            if mask_name in self.masks:
+                weights[mask_name] = param.cpu().detach().numpy()
+
+        for name, param in self.decoder.named_parameters():
+            mask_name = PrunedTransformerModel.to_mask_name(name, False)
+            if mask_name in self.masks:
+                weights[mask_name] = param.cpu().detach().numpy()
+
+        weight_vec = np.concatenate([v[current_mask[k] == 1] for k, v in weights.items()])
+        threshold = np.sort(np.abs(weight_vec))[n_weights_to_prune]
+
+        new_mask = {k: np.where(np.abs(v) > threshold, current_mask[k], np.zeros_like(v))
+                    for k, v in weights.items()}  
+
+        for mask_name in self.masks:
+            self.masks[mask_name] = torch.ByteTensor(new_mask[mask_name])
+        self.apply_masks()
 
     @staticmethod
     def add_args(parser):
@@ -620,7 +755,9 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         )
 
         self.adaptive_softmax = None
-        self.output_projection = None
+        self.output_projection = nn.Linear(
+            self.output_embed_dim, len(dictionary), bias=False
+        )
         if args.adaptive_softmax_cutoff is not None:
             self.adaptive_softmax = AdaptiveSoftmax(
                 len(dictionary),
@@ -631,6 +768,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                 factor=args.adaptive_softmax_factor,
                 tie_proj=args.tie_adaptive_proj,
             )
+            print("fdsa")
         elif self.share_input_output_embed:
             self.output_projection = nn.Linear(
                 self.embed_tokens.weight.shape[1],
