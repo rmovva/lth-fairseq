@@ -135,6 +135,67 @@ def main(args, init_distributed=False):
     logger.info('done training in {:.1f} seconds'.format(train_meter.sum))
 
 
+def iterative_pruning_and_rewinding(model, 
+                                    trainer, 
+                                    max_epoch,
+                                    min_lr,
+                                    final_weight_frac, 
+                                    n_lth_iters, 
+                                    rewind_fname):
+    # p = 1 - s^(1/n)
+    prune_frac = 1 - final_weight_frac**(1/n_lth_iters)
+
+    # build initial mask for model
+    # trainer.get_model().build_mask()
+    # mask = trainer.get_model().get_mask()
+    for itr in range(n_lth_iters):
+        logger.info('IMP training iteration {}; current sparsity: {.3f}'.format(
+            itr,
+            model.get_sparsity()
+        ))
+        if itr != 0:
+            rewind_checkpoint = f'{rewind_fname}_{itr-1}.pt'
+            trainer.load_checkpoint(rewind_checkpoint,
+                                    reset_optimizer=False,
+                                    reset_lr_scheduler=False
+                                    )
+            epoch_itr = trainer.get_train_iterator(epoch=1,
+                                                   load_dataset=True
+                                                   )
+
+        # apply the current mask to the current model
+        # trainer.get_model().apply_mask(mask)
+
+        lr = trainer.get_lr()
+        train_meter = meters.StopwatchMeter()
+        train_meter.start()
+        while (
+            lr > min_lr
+            and epoch_itr.next_epoch_idx <= max_epoch
+        ):
+            # train for one epoch
+            valid_losses, should_stop = train(args, trainer, task, epoch_itr)
+            if should_stop:
+                break
+
+            # only use first validation loss to update the learning rate
+            lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
+
+            epoch_itr = trainer.get_train_iterator(
+                epoch_itr.next_epoch_idx,
+                # sharded data: get train iterator for next epoch
+                load_dataset=(os.pathsep in getattr(args, 'data', '')),
+            )
+        train_meter.stop()
+        logger.info('done training IMP iteration {} in {:.1f} seconds'.format(itr, train_meter.sum))
+
+        # update mask
+        # trainer.get_model().prune_weights() --> updates model's mask
+        # mask = trainer.get_model().get_mask() --> gets model's mask
+
+
+
+
 def should_stop_early(args, valid_loss):
     # skip check if no validation was done in the current epoch
     if valid_loss is None:
