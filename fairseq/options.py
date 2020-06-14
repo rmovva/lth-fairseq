@@ -457,6 +457,8 @@ def add_optimization_args(parser):
 def add_checkpoint_args(parser):
     group = parser.add_argument_group("Checkpointing")
     # fmt: off
+    group.add_argument('--lth-rewind-iter', type=int, default=1000, metavar='N',
+                       help='iteration to rewind to during LTH training')
     group.add_argument('--save-dir', metavar='DIR', default='checkpoints',
                        help='path to save checkpoints')
     group.add_argument('--restore-file', default='checkpoint_last.pt',

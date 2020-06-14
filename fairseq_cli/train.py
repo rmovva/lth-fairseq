@@ -242,6 +242,7 @@ def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoc
             and num_updates % args.save_interval_updates == 0
         )
         or (end_of_epoch and epoch_itr.epoch % args.save_interval == 0)
+        or (num_updates == args.lth_rewind_iter)
     )
     do_validate = (
         (
