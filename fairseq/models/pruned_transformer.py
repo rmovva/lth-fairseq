@@ -172,6 +172,11 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         
     
     def build_masks(self, encoder, decoder, prune_embeddings=False):
+        """
+        Build masks for each of the model's named layers.
+        Also keeps track of the properties of each named layer.
+        Returns masks and properties to be used in PrunedTransformer initialization.
+        """
         masks = {}
         param_properties = {}
         for name, param in encoder.named_parameters():
@@ -206,7 +211,23 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         #print(decoder.output_projection)
         return masks, param_properties
 
+
+    def get_masks(self):
+        """Get the model's current dictionary of masks."""
+        return self.masks
+
+
+    def set_masks(self, masks):
+        """Set the model's mask dictionary to a specified value."""
+        assert (masks.keys() = self.masks.keys()), "New mask keys must match existing PrunedTransformer mask keys"
+        self.masks = masks
+
+
     def apply_masks(self):
+        """
+        Apply the model's current masks stored in self.masks, 
+        by modifying its parameters accordingly
+        """
         for name, param in self.encoder.named_parameters():
             mask_name = PrunedTransformerModel.to_mask_name(name, True)
             if mask_name in self.masks:
@@ -216,7 +237,14 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
             if mask_name in self.masks:
                 param.data *= self.masks[mask_name]
     
+
     def prune_weights(self, prune_frac):
+        """
+        Magnitude prune a fraction of remaining weights.
+        prune_frac specifies the percent of the *current* number of weights to prune.
+        e.g. prune_frac = 0.2 when we have 40% sparsity means that an additional 
+        0.2*60% = 12% of the total number of initial weights will be pruned.
+        """
         current_mask = {name: self.masks[name].numpy() for name in self.masks}
         n_remaining_weights = np.sum([np.sum(v) for v in current_mask.values()])
         n_weights_to_prune = np.ceil(n_remaining_weights * prune_frac).astype(int)
@@ -241,7 +269,6 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
         for mask_name in self.masks:
             self.masks[mask_name] = torch.ByteTensor(new_mask[mask_name])
-        self.apply_masks()
 
     @staticmethod
     def add_args(parser):

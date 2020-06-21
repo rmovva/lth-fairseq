@@ -146,8 +146,7 @@ def iterative_pruning_and_rewinding(model,
     prune_frac = 1 - final_weight_frac**(1/n_lth_iters)
 
     # build initial mask for model
-    # trainer.get_model().build_mask()
-    # mask = trainer.get_model().get_mask()
+    cur_mask = trainer.get_model().get_masks()
     for itr in range(n_lth_iters):
         logger.info('IMP training iteration {}; current sparsity: {.3f}'.format(
             itr,
@@ -163,8 +162,9 @@ def iterative_pruning_and_rewinding(model,
                                                    load_dataset=True
                                                    )
 
-        # apply the current mask to the current model
-        # trainer.get_model().apply_mask(mask)
+            # set the rewinded model's mask to current mask, and apply the mask
+            trainer.get_model().set_masks(cur_mask)
+            trainer.get_model().apply_masks()
 
         lr = trainer.get_lr()
         train_meter = meters.StopwatchMeter()
@@ -189,9 +189,9 @@ def iterative_pruning_and_rewinding(model,
         train_meter.stop()
         logger.info('done training IMP iteration {} in {:.1f} seconds'.format(itr, train_meter.sum))
 
-        # update mask
-        # trainer.get_model().prune_weights() --> updates model's mask
-        # mask = trainer.get_model().get_mask() --> gets model's mask
+        # update mask by pruning, and store new mask
+        trainer.get_model().prune_weights(prune_frac)
+        cur_mask = trainer.get_model().get_masks()
 
 
 
