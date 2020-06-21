@@ -135,7 +135,8 @@ def main(args, init_distributed=False):
     logger.info('done training in {:.1f} seconds'.format(train_meter.sum))
 
 
-def iterative_pruning_and_rewinding(model, 
+def iterative_pruning_and_rewinding(args,
+									model, 
                                     trainer, 
                                     max_epoch,
                                     min_lr,
@@ -145,7 +146,7 @@ def iterative_pruning_and_rewinding(model,
     # p = 1 - s^(1/n)
     prune_frac = 1 - final_weight_frac**(1/n_lth_iters)
 
-    # build initial mask for model
+    # store the initial mask
     cur_mask = trainer.get_model().get_masks()
     for itr in range(n_lth_iters):
         logger.info('IMP training iteration {}; current sparsity: {.3f}'.format(
@@ -153,7 +154,9 @@ def iterative_pruning_and_rewinding(model,
             model.get_sparsity()
         ))
         if itr != 0:
-            rewind_checkpoint = f'{rewind_fname}_{itr-1}.pt'
+            rewind_checkpoint = os.path.join(args.save_dir, 
+            								 'checkpoint1.pt')
+            								 # f'checkpoint_LTH{itr-1}_iter{args.lth_rewind_iter}.pt')
             trainer.load_checkpoint(rewind_checkpoint,
                                     reset_optimizer=False,
                                     reset_lr_scheduler=False
@@ -188,6 +191,10 @@ def iterative_pruning_and_rewinding(model,
             )
         train_meter.stop()
         logger.info('done training IMP iteration {} in {:.1f} seconds'.format(itr, train_meter.sum))
+
+        # save this model
+        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
+        								 custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
 
         # update mask by pruning, and store new mask
         trainer.get_model().prune_weights(prune_frac)

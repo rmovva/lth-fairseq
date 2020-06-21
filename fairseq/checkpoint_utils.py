@@ -20,7 +20,7 @@ from torch.serialization import default_restore_location
 logger = logging.getLogger(__name__)
 
 
-def save_checkpoint(args, trainer, epoch_itr, val_loss):
+def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
     from fairseq import distributed_utils, meters
 
     # only one worker should attempt to create the required dir
@@ -76,6 +76,13 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
     checkpoints = [
         os.path.join(args.save_dir, fn) for fn, cond in checkpoint_conds.items() if cond
     ]
+    for fn, cond in checkpoint_conds.items():
+        if custom_filename is None:
+            custom_filename = fn
+        if cond:
+            checkpoints.append(os.path.join(args.save_dir, custom_filename))
+    checkpoints = list(set(checkpoints))
+
     if len(checkpoints) > 0:
         trainer.save_checkpoint(checkpoints[0], extra_state)
         for cp in checkpoints[1:]:
