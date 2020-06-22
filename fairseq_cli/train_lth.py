@@ -110,48 +110,20 @@ def main(args, init_distributed=False):
         xm.mark_step()
 
     # Train until the learning rate gets too small
-    max_epoch = args.max_epoch or math.inf
-    lr = trainer.get_lr()
-    train_meter = meters.StopwatchMeter()
-    train_meter.start()
-    while (
-        lr > args.min_lr
-        and epoch_itr.next_epoch_idx <= max_epoch
-    ):
-        # train for one epoch
-        valid_losses, should_stop = train(args, trainer, task, epoch_itr)
-        if should_stop:
-            break
-
-        # only use first validation loss to update the learning rate
-        lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
-
-        epoch_itr = trainer.get_train_iterator(
-            epoch_itr.next_epoch_idx,
-            # sharded data: get train iterator for next epoch
-            load_dataset=(os.pathsep in getattr(args, 'data', '')),
-        )
-    train_meter.stop()
-    logger.info('done training in {:.1f} seconds'.format(train_meter.sum))
+    iterative_pruning_and_rewinding(args, trainer)
 
 
-def iterative_pruning_and_rewinding(args,
-									model, 
-                                    trainer, 
-                                    max_epoch,
-                                    min_lr,
-                                    final_weight_frac, 
-                                    n_lth_iters, 
-                                    rewind_fname):
+def iterative_pruning_and_rewinding(args, trainer):
     # p = 1 - s^(1/n)
-    prune_frac = 1 - final_weight_frac**(1/n_lth_iters)
+    prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
 
     # store the initial mask
     cur_mask = trainer.get_model().get_masks()
+    max_epoch = args.max_epoch or math.inf
     for itr in range(n_lth_iters):
         logger.info('IMP training iteration {}; current sparsity: {.3f}'.format(
             itr,
-            model.get_sparsity()
+            trainer.get_model().get_sparsity()
         ))
         if itr != 0:
             rewind_checkpoint = os.path.join(args.save_dir, 
@@ -173,7 +145,7 @@ def iterative_pruning_and_rewinding(args,
         train_meter = meters.StopwatchMeter()
         train_meter.start()
         while (
-            lr > min_lr
+            lr > args.min_lr
             and epoch_itr.next_epoch_idx <= max_epoch
         ):
             # train for one epoch

@@ -26,6 +26,7 @@ def get_training_parser(default_task="translation"):
     add_model_args(parser)
     add_optimization_args(parser)
     add_checkpoint_args(parser)
+    add_lth_args(parser)
     return parser
 
 
@@ -454,11 +455,20 @@ def add_optimization_args(parser):
     return group
 
 
-def add_checkpoint_args(parser):
-    group = parser.add_argument_group("Checkpointing")
+def add_lth_args(parser):
+    group = parser.add_argument_group("Lottery ticket training")
     # fmt: off
     group.add_argument('--lth-rewind-iter', type=int, default=1000, metavar='N',
                        help='iteration to rewind to during LTH training')
+    group.add_argument('--final_sparsity', type=float, default=0.5, metavar='N',
+                       help='percent of weights to mask by end of LTH training')
+    group.add_argument('--n_lth_iterations', type=int, default=1, metavar='N',
+                       help='number of rounds of iterative pruning/rewinding to achieve final sparsity')
+
+
+def add_checkpoint_args(parser):
+    group = parser.add_argument_group("Checkpointing")
+    # fmt: off
     group.add_argument('--save-dir', metavar='DIR', default='checkpoints',
                        help='path to save checkpoints')
     group.add_argument('--restore-file', default='checkpoint_last.pt',

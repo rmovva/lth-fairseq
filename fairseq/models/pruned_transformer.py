@@ -219,7 +219,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
     def set_masks(self, masks):
         """Set the model's mask dictionary to a specified value."""
-        assert (masks.keys() = self.masks.keys()), "New mask keys must match existing PrunedTransformer mask keys"
+        assert (masks.keys() == self.masks.keys()), "New mask keys must match existing PrunedTransformer mask keys"
         self.masks = masks
 
 
