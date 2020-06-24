@@ -223,6 +223,11 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         self.masks = masks
 
 
+    def get_sparsity(self):
+        """Returns the model's current sparsity, i.e. the percent of weights with a mask value of zero."""
+        return 0.0
+
+
     def apply_masks(self):
         """
         Apply the model's current masks stored in self.masks, 
