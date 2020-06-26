@@ -190,7 +190,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                 name_is_prunable = False
 
             if name_is_prunable:
-                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
                 param_properties[mask_name] = param_prop
 
         temp = set()
@@ -205,7 +205,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                 name_is_prunable = False
 
             if name_is_prunable:
-                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+                masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
                 param_properties[mask_name] = param_prop
 
         #print(decoder.output_projection)
