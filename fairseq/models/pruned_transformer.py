@@ -94,13 +94,17 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
     @staticmethod
     def get_param_props(name):
-        # module: "encoder" or "decoder"
-        # type: "fc", "attention", "embedding", "layernorm", "output"
-        # layer: 0-5 (if not embedding or output)
-        # attention: "self", "enc_dec" (if attention)
-        # proj: "query", "key", "value", "out" (if attention)
-        # weightorbias: "weight", "bias" (if linear)
-        # fc_order: 1 or 2 (if fc)
+        """
+        Parses the PyTorch model's layer name to infer layer properties.
+        Output is a dictionary with various keys/values, possibilities enumerated below:
+            module: "encoder" or "decoder"
+            type: "fc", "attention", "embedding", "layernorm", "output"
+            layer: 0-5 (if not embedding or output)
+            attention: "self", "enc_dec" (if attention)
+            proj: "query", "key", "value", "out" (if attention)
+            weightorbias: "weight", "bias" (if linear)
+            fc_order: 1 or 2 (if fc)
+        """
         split_name = name.split(".")
         module = split_name[0]
         if "layer_norm" in name:
@@ -153,22 +157,14 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
 
     def __init__(self, args, encoder, decoder):
+        """
+        Initializes PrunedTransformer as an instance of an EncoderDecoder model.
+        Builds masks and stores as instance variable.
+        """
         super().__init__(encoder, decoder)
         self.args = args
         self.supports_align_args = True
         self.masks, self.param_properties = self.build_masks(encoder, decoder)
-        # param_properties[name]:
-            # module: "encoder" or "decoder"
-            # type: "fc", "attention", "embedding", "layernorm", "output"
-            # layer: 0-5 (if not embedding or output)
-            # attention: "enc_self", "enc_dec", "dec_self" (if attention)
-            # proj: "query", "key", "value", "out" (if attention)
-            # weight/bias: "weight", "bias" (if linear)
-            # fc_order: 1 or 2 (if fc)
-
-        #self.prune_weights(.5)
-        #self.prune_weights(.5)
-        #self.prune_weights(.5)
         
     
     def build_masks(self, encoder, decoder, prune_embeddings=False):
@@ -182,7 +178,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         for name, param in encoder.named_parameters():
             mask_name = PrunedTransformerModel.to_mask_name(name, True)
             param_prop = PrunedTransformerModel.get_param_props(mask_name)
-            #print(mask_name, param_prop)
+
             name_is_prunable = True
             if param_prop["type"] == "layernorm": 
                 name_is_prunable = False
@@ -193,11 +189,10 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                 masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
                 param_properties[mask_name] = param_prop
 
-        temp = set()
         for name, param in decoder.named_parameters():
-            temp.add(name)
             mask_name = PrunedTransformerModel.to_mask_name(name, False)
             param_prop = PrunedTransformerModel.get_param_props(mask_name)
+
             name_is_prunable = True
             if param_prop["type"] == "layernorm": 
                 name_is_prunable = False
@@ -208,7 +203,6 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                 masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
                 param_properties[mask_name] = param_prop
 
-        #print(decoder.output_projection)
         return masks, param_properties
 
 
@@ -225,7 +219,19 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
     def get_sparsity(self):
         """Returns the model's current sparsity, i.e. the percent of weights with a mask value of zero."""
-        return 0.0
+        total_params = 0
+        total_masked = 0
+        for name, param in self.encoder.named_parameters():
+            total_params += np.prod(param.size())
+            mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+            if mask_name in self.masks:
+                total_masked += (self.masks[mask_name] == 0).sum()
+	for name, param in self.decoder.named_parameters():
+            total_params += np.prod(param.size())
+            mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+            if mask_name in self.masks:
+                total_masked += (self.masks[mask_name] == 0).sum()
+	return total_masked / total_params
 
 
     def apply_masks(self):
@@ -234,11 +240,11 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         by modifying its parameters accordingly
         """
         for name, param in self.encoder.named_parameters():
-            mask_name = PrunedTransformerModel.to_mask_name(name, True)
+            mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
             if mask_name in self.masks:
                 param.data *= self.masks[mask_name]
         for name, param in self.decoder.named_parameters():
-            mask_name = PrunedTransformerModel.to_mask_name(name, False)
+            mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
             if mask_name in self.masks:
                 param.data *= self.masks[mask_name]
     
@@ -250,7 +256,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
         e.g. prune_frac = 0.2 when we have 40% sparsity means that an additional 
         0.2*60% = 12% of the total number of initial weights will be pruned.
         """
-        current_mask = {name: self.masks[name].numpy() for name in self.masks}
+        current_mask = {name: self.masks[name].cpu().numpy() for name in self.masks}
         n_remaining_weights = np.sum([np.sum(v) for v in current_mask.values()])
         n_weights_to_prune = np.ceil(n_remaining_weights * prune_frac).astype(int)
         #print(n_remaining_weights, n_weights_to_prune)
@@ -273,7 +279,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                     for k, v in weights.items()}  
 
         for mask_name in self.masks:
-            self.masks[mask_name] = torch.ByteTensor(new_mask[mask_name])
+            self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
 
     @staticmethod
     def add_args(parser):
