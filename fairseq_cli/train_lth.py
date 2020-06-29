@@ -100,15 +100,6 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    # Load the latest checkpoint if one is available and restore the
-    # corresponding train iterator
-    extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
-    if args.tpu:
-        import torch_xla.core.xla_model as xm
-        xm.rendezvous('load_checkpoint')  # wait for all workers
-        xm.mark_step()
-
-    # Train until the learning rate gets too small
     iterative_pruning_and_rewinding(args, task, trainer)
 
 
@@ -124,6 +115,9 @@ def iterative_pruning_and_rewinding(args, task, trainer):
             itr,
             trainer.get_model().get_sparsity()
         ))
+        # On first LTH iteration, load from latest checkpoint if available
+        if itr == 0:
+            extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
         if itr != 0:
             rewind_checkpoint = os.path.join(args.save_dir, 
             								 'checkpoint1.pt')
@@ -136,8 +130,8 @@ def iterative_pruning_and_rewinding(args, task, trainer):
             # set the rewinded model's mask to current mask, and apply the mask
             trainer.get_model().set_masks(cur_mask)
             trainer.get_model().apply_masks()
+            epoch_itr = trainer.get_train_iterator(epoch=1, load_dataset=True)
 
-        epoch_itr = trainer.get_train_iterator(epoch=1, load_dataset=True)
         lr = trainer.get_lr()
         train_meter = meters.StopwatchMeter()
         train_meter.start()
@@ -168,8 +162,6 @@ def iterative_pruning_and_rewinding(args, task, trainer):
         # update mask by pruning, and store new mask
         trainer.get_model().prune_weights(prune_frac)
         cur_mask = trainer.get_model().get_masks()
-
-
 
 
 def should_stop_early(args, valid_loss):
