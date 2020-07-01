@@ -100,7 +100,10 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    iterative_pruning_and_rewinding(args, task, trainer)
+    if args.lr_rewind:
+        learning_rate_rewinding(args, task, trainer)
+    else:
+        iterative_pruning_and_rewinding(args, task trainer)
 
 
 def iterative_pruning_and_rewinding(args, task, trainer):
@@ -162,6 +165,63 @@ def iterative_pruning_and_rewinding(args, task, trainer):
         # update mask by pruning, and store new mask
         trainer.get_model().prune_weights(prune_frac)
         cur_mask = trainer.get_model().get_masks()
+
+
+def learning_rate_rewinding(args, task, trainer):
+    # p = 1 - s^(1/n)
+    prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
+
+    max_epoch = args.max_epoch or math.inf
+    for lth_iter in range(args.n_lth_iterations):
+        logger.info('IMP training iteration {}; current sparsity: {}'.format(
+            itr,
+            trainer.get_model().get_sparsity()
+        ))
+        # On first LTH iteration, load from latest checkpoint if available
+        if lth_iter == 0:
+            extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
+        if itr != 0:
+            # rewind the model's update count to halfway through training
+            # this will also set the learning rate to the value at halfway through train
+            cur_update_count = trainer.get_num_updates()
+            rewind_update = int(0.5*cur_update_count)
+            trainer.set_num_updates(rewind_update)
+            print('Rewound update count to %d' % rewind_update)
+            
+            # set epoch number to halfway point
+            reset_epoch = max_epoch // 2 if max_epoch is not math.inf else 1
+            epoch_itr = trainer.get_train_iterator(epoch=reset_epoch, load_dataset=True)
+
+        lr = trainer.get_lr()
+        train_meter = meters.StopwatchMeter()
+        train_meter.start()
+        while (
+            lr > args.min_lr
+            and epoch_itr.next_epoch_idx <= max_epoch
+        ):
+            # train for one epoch
+            valid_losses, should_stop = train(args, trainer, task, epoch_itr)
+            if should_stop:
+                break
+
+            # only use first validation loss to update the learning rate
+            lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
+
+            epoch_itr = trainer.get_train_iterator(
+                epoch_itr.next_epoch_idx,
+                # sharded data: get train iterator for next epoch
+                load_dataset=(os.pathsep in getattr(args, 'data', '')),
+            )
+        train_meter.stop()
+        logger.info('done training IMP iteration {} in {:.1f} seconds'.format(itr, train_meter.sum))
+
+        # save this model
+        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
+                                         custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
+
+        # update mask by pruning, and apply mask
+        trainer.get_model().prune_weights(prune_frac)
+        trainer.get_model().apply_masks()
 
 
 def should_stop_early(args, valid_loss):

@@ -464,6 +464,8 @@ def add_lth_args(parser):
                        help='percent of weights to mask by end of LTH training')
     group.add_argument('--n_lth_iterations', type=int, default=1, metavar='N',
                        help='number of rounds of iterative pruning/rewinding to achieve final sparsity')
+    group.add_argument('--lr_rewind', default=False, action='store_true',
+                        help='specify if we do learning rate rewinding, a la [Renda et al. 2020]')
 
 
 def add_checkpoint_args(parser):

@@ -182,9 +182,11 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 				name_is_prunable = False
 			if not prune_embeddings and param_prop["type"] == "embedding":
 				name_is_prunable = False
-
 			if name_is_prunable:
-				masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
+				if self.args.cpu:
+					masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+				else:
+					masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
 				param_properties[mask_name] = param_prop
 
 		for name, param in decoder.named_parameters():
@@ -198,7 +200,10 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 				name_is_prunable = False
 
 			if name_is_prunable:
-				masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
+				if self.args.cpu:
+					masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
+				else:
+					masks[mask_name] = torch.ones(param.shape, dtype=torch.bool).cuda()
 				param_properties[mask_name] = param_prop
 
 		return masks, param_properties
