@@ -102,11 +102,16 @@ def main(args, init_distributed=False):
 
     trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
     mask = trainer.get_model().get_masks()
-    print(mask.keys())
+    print("Mask sparsity")
     print(trainer.get_model().get_sparsity())
+    print("Manual sparsity")
+    print(trainer.get_model().get_manual_sparsity())
     trainer.get_model().prune_weights(0.2)
     trainer.get_model().apply_masks()
+    print("Mask sparsity")
     print(trainer.get_model().get_sparsity())
+    print("Manual sparsity")
+    print(trainer.get_model().get_manual_sparsity())
 
     print("main() complete")
 
