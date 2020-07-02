@@ -73,9 +73,6 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
     if hasattr(save_checkpoint, "best"):
         extra_state.update({"best": save_checkpoint.best})
 
-    checkpoints = [
-        os.path.join(args.save_dir, fn) for fn, cond in checkpoint_conds.items() if cond
-    ]
     for fn, cond in checkpoint_conds.items():
         if custom_filename is None:
             custom_filename = fn
@@ -89,9 +86,10 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
             PathManager.copy(checkpoints[0], cp, overwrite=True)
 
         write_timer.stop()
+        fn = checkpoints[0] if custom_filename is None else custom_filename
         logger.info(
             "saved checkpoint {} (epoch {} @ {} updates, score {}) (writing took {} seconds)".format(
-                checkpoints[0], epoch, updates, val_loss, write_timer.sum
+                fn, epoch, updates, val_loss, write_timer.sum
             )
         )
 

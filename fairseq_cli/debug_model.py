@@ -63,9 +63,9 @@ def main(args, init_distributed=False):
     # Setup task, e.g., translation, language modeling, etc.
     task = tasks.setup_task(args)
 
-    # Load valid dataset (we load training data below, based on the latest checkpoint)
-    for valid_sub_split in args.valid_subset.split(','):
-        task.load_dataset(valid_sub_split, combine=False, epoch=1)
+    # # Load valid dataset (we load training data below, based on the latest checkpoint)
+    # for valid_sub_split in args.valid_subset.split(','):
+    #     task.load_dataset(valid_sub_split, combine=False, epoch=1)
 
     # Build model and criterion
     model = task.build_model(args)
@@ -78,19 +78,19 @@ def main(args, init_distributed=False):
     ))
 
 
-    # (optionally) Configure quantization
-    if args.quantization_config_path is not None:
-        quantizer = quantization_utils.Quantizer(
-            config_path=args.quantization_config_path,
-            max_epoch=args.max_epoch,
-            max_update=args.max_update,
-        )
-    else:
-        quantizer = None
+    # # (optionally) Configure quantization
+    # if args.quantization_config_path is not None:
+    #     quantizer = quantization_utils.Quantizer(
+    #         config_path=args.quantization_config_path,
+    #         max_epoch=args.max_epoch,
+    #         max_update=args.max_update,
+    #     )
+    # else:
+    #     quantizer = None
 
     # Build trainer
     if args.model_parallel_size == 1:
-        trainer = Trainer(args, task, model, criterion, quantizer)
+        trainer = Trainer(args, task, model, criterion, quantizer=None)
     else:
         trainer = MegatronTrainer(args, task, model, criterion)
 
@@ -100,10 +100,15 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    if args.lr_rewind:
-        learning_rate_rewinding(args, task, trainer)
-    else:
-        iterative_pruning_and_rewinding(args, task, trainer)
+    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
+    mask = trainer.get_model().get_masks()
+    print(mask.keys())
+    print(trainer.get_model().get_sparsity())
+    trainer.get_model().prune_weights(0.2)
+    trainer.get_model().apply_masks()
+    print(trainer.get_model().get_sparsity())
+
+    print("main() complete")
 
 
 def iterative_pruning_and_rewinding(args, task, trainer):

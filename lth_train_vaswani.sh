@@ -14,8 +14,8 @@ python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--weight-decay 0.0 \
 	--criterion label_smoothed_cross_entropy \
 	--label-smoothing 0.1 \
-	--max-tokens 10000 \
-	--max-epoch 70 \
+	--max-tokens 12000 \
+	--max-epoch 60 \
 	--save-interval 5 \
 	--save-interval-updates 0 \
 	--tensorboard-logdir /raj-learn/logs/wmt16_en_de_big/ \
@@ -24,4 +24,5 @@ python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--num-workers 32 \
 	--disable-validation \
 	--final_sparsity 0.3 \
-	--n_lth_iterations 6
+	--n_lth_iterations 6 \
+	--lr-rewind
