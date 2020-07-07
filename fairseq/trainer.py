@@ -248,6 +248,10 @@ class Trainer(object):
                 )
 
             extra_state = state["extra_state"]
+            if extra_state is not None and "masks" in extra_state:
+                saved_masks = extra_state.pop("masks")
+                self.get_model().set_masks(saved_masks)
+
             self._optim_history = state["optimizer_history"]
             last_optim_state = state.get("last_optimizer_state", None)
 

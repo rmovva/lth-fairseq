@@ -100,18 +100,23 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
-    mask = trainer.get_model().get_masks()
+    # prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
+    # print(prune_frac)
+
+    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint33.pt'))
+    # trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
+    # mask = trainer.get_model().get_masks()
     print("Mask sparsity")
     print(trainer.get_model().get_sparsity())
     print("Manual sparsity")
     print(trainer.get_model().get_manual_sparsity())
-    trainer.get_model().prune_weights(0.2)
-    trainer.get_model().apply_masks()
-    print("Mask sparsity")
-    print(trainer.get_model().get_sparsity())
-    print("Manual sparsity")
-    print(trainer.get_model().get_manual_sparsity())
+    # trainer.get_model().infer_masks()
+    # trainer.get_model().prune_weights(prune_frac)
+    # trainer.get_model().apply_masks()
+    # print("Mask sparsity")
+    # print(trainer.get_model().get_sparsity())
+    # print("Manual sparsity")
+    # print(trainer.get_model().get_manual_sparsity())
 
     print("main() complete")
 
@@ -209,6 +214,10 @@ def learning_rate_rewinding(args, task, trainer):
             lr > args.min_lr
             and epoch_itr.next_epoch_idx <= max_epoch
         ):
+            logger.info('epoch {}; current sparsity: {}'.format(
+                epoch_itr.epoch,
+                trainer.get_model().get_manual_sparsity()
+            ))
             # train for one epoch
             valid_losses, should_stop = train(args, trainer, task, epoch_itr)
             if should_stop:

@@ -1,6 +1,7 @@
 #!/bin/bash
 python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--save-dir /raid/checkpoints/ \
+	--restore-file /raid/checkpoints/checkpoint33.pt \
 	--arch pruned_transformer_vaswani_wmt_en_de_big \
 	--share-all-embeddings \
 	--optimizer adam \
@@ -16,13 +17,13 @@ python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--label-smoothing 0.1 \
 	--max-tokens 12000 \
 	--max-epoch 60 \
-	--save-interval 5 \
+	--save-interval 3 \
 	--save-interval-updates 0 \
 	--tensorboard-logdir /raj-learn/logs/wmt16_en_de_big/ \
 	--no-progress-bar \
 	--log-interval 500 \
 	--num-workers 32 \
 	--disable-validation \
-	--final_sparsity 0.3 \
+	--final_sparsity 0.75 \
 	--n_lth_iterations 6 \
 	--lr-rewind

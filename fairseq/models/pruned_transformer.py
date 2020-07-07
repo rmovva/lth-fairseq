@@ -182,6 +182,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 				name_is_prunable = False
 			if not prune_embeddings and param_prop["type"] == "embedding":
 				name_is_prunable = False
+
 			if name_is_prunable:
 				if self.args.cpu:
 					masks[mask_name] = torch.ones(param.shape, dtype=torch.bool)
@@ -217,81 +218,17 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 	def set_masks(self, masks):
 		"""Set the model's mask dictionary to a specified value."""
 		assert (masks.keys() == self.masks.keys()), "New mask keys must match existing PrunedTransformer mask keys"
-		self.masks = masks
-
-
-	def get_sparsity(self):
-		"""Returns the model's current sparsity, i.e. the percent of weights with a mask value of zero."""
-		total_params = 0
-		total_masked = 0
-		for name, param in self.encoder.named_parameters():
-			total_params += np.prod(param.size())
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
-			if mask_name in self.masks:
-				total_masked += (self.masks[mask_name] == 0).sum()
-		for name, param in self.decoder.named_parameters():
-			# skip embedding weights in decoder to avoid double-counting shared embedding weights.
-			if "embed_tokens" in name:
-				continue
-			total_params += np.prod(param.size())
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
-			if mask_name in self.masks:
-				total_masked += (self.masks[mask_name] == 0).sum()
-		print("total params: %d" % total_params)
-		print("total masked: %d" % total_masked)
-		return float(1.0 * total_masked / total_params)
-
-
-	def get_manual_sparsity(self):
-		"""
-		Returns the model's current sparsity, i.e. the percent of weights with a value of exactly zero.
-		Counts weights equal to zero by checking param.data, instead of checking mask values.
-		This method can be used when a model is loaded from a checkpoint but its mask isn't already stored.
-		"""
-		total_params = 0
-		total_masked = 0
-		for name, param in self.encoder.named_parameters():
-			total_params += np.prod(param.size())
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
-			if mask_name in self.masks:
-				total_masked += (param.data == 0).sum()
-		for name, param in self.decoder.named_parameters():
-			# skip embedding weights in decoder to avoid double-counting shared embedding weights.
-			if "embed_tokens" in name:
-				continue
-			total_params += np.prod(param.size())
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
-			if mask_name in self.masks:
-				total_masked += (param.data == 0).sum()
-		print("total params: %d" % total_params)
-		print("total masked: %d" % total_masked)
-		return float(1.0 * total_masked / total_params)
-
-
-	def infer_mask(self):
-		"""
-		Infers masked weights by looking for zeros in param.data objects.
-		Sets the corresponding mask values for these weights to zero.
-		This is useful when a pruned model is loaded from a checkpoint,
-		but the checkpoint does not contain the model's mask.
-		For a randomly initialized model, there should be no "false positive"
-		zeros, especially with standard precision training (since a weight
-		should never become so small that it is registered as a true zero).
-		"""
-		for name, param in self.encoder.named_parameters():
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
-			if mask_name in self.masks:
-				self.masks[mask_name][param.data == 0] = 0
-		for name, param in self.decoder.named_parameters():
-			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
-			if mask_name in self.masks:
-				self.masks[mask_name][param.data == 0] = 0
+		for mask_name in masks:
+			if self.args.cpu:
+				self.masks[mask_name] = torch.BoolTensor(masks[mask_name])
+			else:
+				self.masks[mask_name] = torch.BoolTensor(masks[mask_name]).cuda()
 
 
 	def apply_masks(self):
 		"""
 		Apply the model's current masks stored in self.masks, 
-		by modifying its parameters accordingly
+		by modifying its parameters accordingly.
 		"""
 		for name, param in self.encoder.named_parameters():
 			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
@@ -301,6 +238,23 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
 			if mask_name in self.masks:
 				param.data *= self.masks[mask_name]
+
+
+	def apply_masks_grad_hooks(self):
+		"""
+		Applies masks by setting masked weights to zero,
+		and also creating backwards hooks that masks weights during the backward pass.
+		"""
+		for name, param in self.encoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+			if mask_name in self.masks:
+				param.data *= self.masks[mask_name]
+				param.register_hook(lambda x, name=mask_name: x*self.masks[name])
+		for name, param in self.decoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+			if mask_name in self.masks:
+				param.data *= self.masks[mask_name]
+				param.register_hook(lambda x, name=mask_name: x*self.masks[name])
 	
 
 	def prune_weights(self, prune_frac):
@@ -312,7 +266,6 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 		"""
 		current_mask = {name: self.masks[name].cpu().numpy() for name in self.masks}
 		n_remaining_weights = np.sum([np.sum(v) for v in current_mask.values()])
-		print(f"# remaining weights before pruning: {n_remaining_weights}")
 		n_weights_to_prune = np.ceil(n_remaining_weights * prune_frac).astype(int)
 
 		weights = {}
@@ -333,7 +286,10 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 					for k, v in weights.items()}  
 
 		for mask_name in self.masks:
-			self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
+			if self.args.cpu:
+				self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name])
+			else:
+				self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
 
 
 	def random_prune(self, prune_frac):
@@ -366,6 +322,71 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
 		for mask_name in self.masks:
 			self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
+
+
+	def get_sparsity(self):
+		"""Returns the model's current sparsity, i.e. the percent of weights with a mask value of zero."""
+		total_params = 0
+		total_masked = 0
+		for name, param in self.encoder.named_parameters():
+			total_params += np.prod(param.size())
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+			if mask_name in self.masks:
+				total_masked += (self.masks[mask_name] == 0).sum()
+		for name, param in self.decoder.named_parameters():
+			# skip embedding weights in decoder to avoid double-counting shared embedding weights.
+			if "embed_tokens" in name:
+				continue
+			total_params += np.prod(param.size())
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+			if mask_name in self.masks:
+				total_masked += (self.masks[mask_name] == 0).sum()
+		return [int(total_params), int(total_masked), float(1.0 * total_masked / total_params)]
+
+
+	def get_manual_sparsity(self):
+		"""
+		Returns the model's current sparsity, i.e. the percent of weights with a value of exactly zero.
+		Counts weights equal to zero by checking param.data, instead of checking mask values.
+		This method can be used when a model is loaded from a checkpoint but its mask isn't already stored.
+		"""
+		total_params = 0
+		total_masked = 0
+		for name, param in self.encoder.named_parameters():
+			total_params += np.prod(param.size())
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+			if mask_name in self.masks:
+				total_masked += (param.data == 0).sum()
+		for name, param in self.decoder.named_parameters():
+			# skip embedding weights in decoder to avoid double-counting shared embedding weights.
+			if "embed_tokens" in name:
+				continue
+			total_params += np.prod(param.size())
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+			if mask_name in self.masks:
+				total_masked += (param.data == 0).sum()
+		return [int(total_params), int(total_masked), float(1.0 * total_masked / total_params)]
+
+
+	def infer_masks(self):
+		"""
+		Infers masked weights by looking for zeros in param.data objects.
+		Sets the corresponding mask values for these weights to zero.
+		This is useful when a pruned model is loaded from a checkpoint,
+		but the checkpoint does not contain the model's mask.
+		For a randomly initialized model, there should be no "false positive"
+		zeros, especially with standard precision training (since a weight
+		should never become so small that it is registered as a true zero).
+		"""
+		for name, param in self.encoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+			if mask_name in self.masks:
+				self.masks[mask_name][param.data == 0] = 0
+		for name, param in self.decoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+			if mask_name in self.masks:
+				self.masks[mask_name][param.data == 0] = 0
+
 
 	@staticmethod
 	def add_args(parser):
@@ -542,6 +563,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 		Copied from the base class, but without ``**kwargs``,
 		which are not supported by TorchScript.
 		"""
+		self.apply_masks()
 		encoder_out = self.encoder(
 			src_tokens,
 			src_lengths=src_lengths,
@@ -892,7 +914,6 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 				factor=args.adaptive_softmax_factor,
 				tie_proj=args.tie_adaptive_proj,
 			)
-			print("fdsa")
 		elif self.share_input_output_embed:
 			self.output_projection = nn.Linear(
 				self.embed_tokens.weight.shape[1],

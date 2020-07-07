@@ -20,7 +20,7 @@ from torch.serialization import default_restore_location
 logger = logging.getLogger(__name__)
 
 
-def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
+def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None, lth_iter=None):
     from fairseq import distributed_utils, meters
 
     # only one worker should attempt to create the required dir
@@ -51,7 +51,14 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
         end_of_epoch
         and not args.no_epoch_checkpoints
         and epoch % args.save_interval == 0
+        and lth_iter is None
     )
+    if lth_iter is not None:
+        checkpoint_conds["checkpoint{}_LTH{}_{}.pt".format(epoch, lth_iter, suffix)] = (
+            end_of_epoch
+            and not args.no_epoch_checkpoints
+            and epoch % args.save_interval == 0
+        )
     checkpoint_conds["checkpoint_{}_{}{}.pt".format(epoch, updates, suffix)] = (
         not end_of_epoch
         and args.save_interval_updates > 0
@@ -72,7 +79,10 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss, custom_filename=None):
     extra_state = {"train_iterator": epoch_itr.state_dict(), "val_loss": val_loss}
     if hasattr(save_checkpoint, "best"):
         extra_state.update({"best": save_checkpoint.best})
+    if hasattr(trainer.get_model(), "masks"):
+        extra_state.update({"masks": trainer.get_model().get_masks()})
 
+    checkpoints = []
     for fn, cond in checkpoint_conds.items():
         if custom_filename is None:
             custom_filename = fn
@@ -161,6 +171,10 @@ def load_checkpoint(args, trainer, **passthrough_args):
         epoch_itr = trainer.get_train_iterator(
             epoch=1, load_dataset=True, **passthrough_args
         )
+
+    if extra_state is not None and "masks" in extra_state:
+        saved_masks = extra_state.pop("masks")
+        trainer.get_model().set_masks(saved_masks)
 
     trainer.lr_step(epoch_itr.epoch)
 
