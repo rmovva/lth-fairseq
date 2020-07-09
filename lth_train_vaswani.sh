@@ -1,7 +1,7 @@
 #!/bin/bash
 python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--save-dir /raid/checkpoints/ \
-	--restore-file /raid/checkpoints/checkpoint33.pt \
+	--restore-file /raid/checkpoints/checkpoint57.pt \
 	--arch pruned_transformer_vaswani_wmt_en_de_big \
 	--share-all-embeddings \
 	--optimizer adam \
@@ -15,7 +15,7 @@ python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
 	--weight-decay 0.0 \
 	--criterion label_smoothed_cross_entropy \
 	--label-smoothing 0.1 \
-	--max-tokens 12000 \
+	--max-tokens 10000 \
 	--max-epoch 60 \
 	--save-interval 3 \
 	--save-interval-updates 0 \

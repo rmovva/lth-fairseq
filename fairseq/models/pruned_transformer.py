@@ -223,6 +223,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 				self.masks[mask_name] = torch.BoolTensor(masks[mask_name])
 			else:
 				self.masks[mask_name] = torch.BoolTensor(masks[mask_name]).cuda()
+                self.apply_masks_grad_hooks()
 
 
 	def apply_masks(self):

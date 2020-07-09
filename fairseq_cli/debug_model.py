@@ -103,7 +103,7 @@ def main(args, init_distributed=False):
     # prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
     # print(prune_frac)
 
-    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint33.pt'))
+    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint36.pt'))
     # trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
     # mask = trainer.get_model().get_masks()
     print("Mask sparsity")
