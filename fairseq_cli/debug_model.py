@@ -12,6 +12,7 @@ import math
 import os
 import random
 import sys
+import json
 
 import numpy as np
 import torch
@@ -77,17 +78,6 @@ def main(args, init_distributed=False):
         sum(p.numel() for p in model.parameters() if p.requires_grad),
     ))
 
-
-    # # (optionally) Configure quantization
-    # if args.quantization_config_path is not None:
-    #     quantizer = quantization_utils.Quantizer(
-    #         config_path=args.quantization_config_path,
-    #         max_epoch=args.max_epoch,
-    #         max_update=args.max_update,
-    #     )
-    # else:
-    #     quantizer = None
-
     # Build trainer
     if args.model_parallel_size == 1:
         trainer = Trainer(args, task, model, criterion, quantizer=None)
@@ -100,23 +90,23 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    # prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
-    # print(prune_frac)
+    checkpoint_dir = '/raj-learn/checkpoints/lr-rewind_0.75sparsity_0.2frac_30epochs/'
+    files = ['checkpoint_LTH0_epoch60.pt',
+             'checkpoint_LTH1_epoch60_sparsity0.168.pt',
+             'checkpoint_LTH2_epoch60_sparsity0.302.pt',
+             'checkpoint_LTH3_epoch60_sparsity0.410.pt',
+             'checkpoint_LTH4_epoch60_sparsity0.496.pt']
 
-    trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint36.pt'))
-    # trainer.load_checkpoint(os.path.join(args.save_dir, 'checkpoint_LTH0_epoch60.pt'))
-    # mask = trainer.get_model().get_masks()
-    print("Mask sparsity")
-    print(trainer.get_model().get_sparsity())
-    print("Manual sparsity")
-    print(trainer.get_model().get_manual_sparsity())
-    # trainer.get_model().infer_masks()
-    # trainer.get_model().prune_weights(prune_frac)
-    # trainer.get_model().apply_masks()
-    # print("Mask sparsity")
-    # print(trainer.get_model().get_sparsity())
-    # print("Manual sparsity")
-    # print(trainer.get_model().get_manual_sparsity())
+    for fn in files:
+        trainer.load_checkpoint(os.path.join(checkpoint_dir, fn))
+        print("Mask sparsity")
+        print(trainer.get_model().get_sparsity())
+        print("Manual sparsity")
+        print(trainer.get_model().get_manual_sparsity())
+        
+        sparsities = trainer.get_model().get_layerwise_sparsity()
+        with open(f'../analysis/layerSparsities_{fn}', 'w') as outfile:
+            json.dump(sparsities, outfile)
 
     print("main() complete")
 
@@ -138,8 +128,8 @@ def iterative_pruning_and_rewinding(args, task, trainer):
             extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
         if itr != 0:
             rewind_checkpoint = os.path.join(args.save_dir, 
-            								 'checkpoint10.pt')
-            								 # f'checkpoint_LTH{itr-1}_iter{args.lth_rewind_iter}.pt')
+                                             'checkpoint10.pt')
+                                             # f'checkpoint_LTH{itr-1}_iter{args.lth_rewind_iter}.pt')
             trainer.load_checkpoint(rewind_checkpoint,
                                     reset_optimizer=False,
                                     reset_lr_scheduler=False
@@ -175,7 +165,7 @@ def iterative_pruning_and_rewinding(args, task, trainer):
 
         # save this model
         checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
-        								 custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
+                                         custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
 
         # update mask by pruning, and store new mask
         trainer.get_model().prune_weights(prune_frac)

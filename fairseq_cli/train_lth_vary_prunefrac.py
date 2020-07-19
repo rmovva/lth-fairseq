@@ -171,10 +171,10 @@ def iterative_pruning_and_rewinding(args, task, trainer):
 def learning_rate_rewinding(args, task, trainer):
     # p = 1 - s^(1/n)
     # prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
-    prune_frac = 0.2
+    prune_frac = 0.4
 
     max_epoch = args.max_epoch or math.inf
-    lth_iter = 2 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    lth_iter = 3 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
     first_round = True
     while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
@@ -225,10 +225,12 @@ def learning_rate_rewinding(args, task, trainer):
         # save this model
         fn = f'checkpoint_LTH{lth_iter}_epoch{epoch_itr.epoch}'
         fn = fn + ('_sparsity%.3f.pt' % trainer.get_model().get_sparsity()[2])
-        if not first_round: 
-            checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, custom_filename=fn)
+        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
+                                         custom_filename=fn)
 
         # update mask by pruning, and apply mask
+        if lth_iter >= 3:
+            prune_frac = 0.2
         trainer.get_model().prune_weights(prune_frac)
         trainer.get_model().apply_masks_grad_hooks()
         lth_iter += 1

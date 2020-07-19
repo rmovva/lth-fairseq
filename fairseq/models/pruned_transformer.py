@@ -223,7 +223,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 				self.masks[mask_name] = torch.BoolTensor(masks[mask_name])
 			else:
 				self.masks[mask_name] = torch.BoolTensor(masks[mask_name]).cuda()
-                self.apply_masks_grad_hooks()
+		self.apply_masks_grad_hooks()
 
 
 	def apply_masks(self):
@@ -387,6 +387,31 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
 			if mask_name in self.masks:
 				self.masks[mask_name][param.data == 0] = 0
+
+
+	def get_layerwise_sparsity(self):
+		"""
+		Computes sparsity of each named module and returns a dictionary.
+		If module is not in self.masks, assigns a sparsity of 0.
+		"""
+		sparsities = {}
+		for name, param in self.encoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
+			param_count = np.prod(param.size())
+			if mask_name in self.masks:
+				pruned_count = (self.masks[mask_name] == 0).sum()
+				sparsities[mask_name] = 1.0*pruned_count / param_count
+			else:
+				sparsities[mask_name] = 0.0
+		for name, param in self.decoder.named_parameters():
+			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
+			param_count = np.prod(param.size())
+			if mask_name in self.masks:
+				pruned_count = (self.masks[mask_name] == 0).sum()
+				sparsities[mask_name] = 1.0*pruned_count / param_count
+			else:
+				sparsities[mask_name] = 0.0
+		return sparsities
 
 
 	@staticmethod
