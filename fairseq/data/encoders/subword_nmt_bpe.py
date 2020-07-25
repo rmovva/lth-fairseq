@@ -44,5 +44,23 @@ class SubwordNMTBPE(object):
     def encode(self, x: str) -> str:
         return self.bpe.process_line(x)
 
+    def encode_with_mapping(self, line):
+        '''
+        input is a line with a full sentence
+        sentence --> sequence of tokens
+        pass sequence of tokens through segment_tokens
+        use output to generate indices mapping to token sequence
+        then, join token sequence + strip whitespace to get result
+        '''
+        token_seq = line.strip('\r\n ').split(' ')
+        bpe_seq = self.bpe.segment_tokens(token_seq)
+        mapping_idxs = []
+        i = 0
+        for j in range(len(bpe_seq)):
+            mapping_idxs.append(i)
+            if self.bpe_symbol not in bpe_seq[j]:
+                i += 1
+        return self.bpe.process_line(line), mapping_idxs
+
     def decode(self, x: str) -> str:
         return (x + ' ').replace(self.bpe_symbol, '').rstrip()

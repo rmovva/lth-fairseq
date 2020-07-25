@@ -95,7 +95,14 @@ def main(args, init_distributed=False):
              'checkpoint_LTH1_epoch60_sparsity0.168.pt',
              'checkpoint_LTH2_epoch60_sparsity0.302.pt',
              'checkpoint_LTH3_epoch60_sparsity0.410.pt',
-             'checkpoint_LTH4_epoch60_sparsity0.496.pt']
+             'checkpoint_LTH4_epoch60_sparsity0.496.pt',
+             'checkpoint_LTH5_epoch60_sparsity0.565.pt'
+             ]
+
+    # fn = 'checkpoint_LTH0_epoch60.pt'
+    # trainer.load_checkpoint(os.path.join(checkpoint_dir, fn))
+    # model = trainer.get_model()
+
 
     for fn in files:
         trainer.load_checkpoint(os.path.join(checkpoint_dir, fn))
@@ -105,8 +112,18 @@ def main(args, init_distributed=False):
         print(trainer.get_model().get_manual_sparsity())
         
         sparsities = trainer.get_model().get_layerwise_sparsity()
-        with open(f'../analysis/layerSparsities_{fn}', 'w') as outfile:
+        with open(f'./analysis/layer_sparsities/layerSparsities_{fn}.json', 'w') as outfile:
             json.dump(sparsities, outfile)
+
+    # trainer.load_checkpoint(os.path.join(checkpoint_dir, 'checkpoint_LTH0_epoch60.pt'))
+    # trainer.get_model().random_prune(0.2)
+    # trainer.get_model().apply_masks()
+    # print(trainer.get_model().get_sparsity())
+    # print(trainer.get_model().get_manual_sparsity())
+    # trainer.get_model().random_prune(0.2)
+    # trainer.get_model().apply_masks()
+    # print(trainer.get_model().get_sparsity())
+    # print(trainer.get_model().get_manual_sparsity())
 
     print("main() complete")
 

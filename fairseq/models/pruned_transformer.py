@@ -162,7 +162,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 		super().__init__(encoder, decoder)
 		self.args = args
 		self.supports_align_args = True
-		self.masks, self.param_properties = self.build_masks(encoder, decoder)
+		self.masks, self.param_properties = self.build_masks(encoder, decoder, args.prune_embeddings)
 		
 	
 	def build_masks(self, encoder, decoder, prune_embeddings=False):
@@ -197,7 +197,9 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 			name_is_prunable = True
 			if param_prop["type"] == "layernorm": 
 				name_is_prunable = False
-			if not prune_embeddings and param_prop["type"] == "embedding":
+			# always set decoder embedding to not prunable, since pruning encoder emb
+			# accomplishes the function of pruning decoder with embedding sharing
+			if param_prop["type"] == "embedding":
 				name_is_prunable = False
 
 			if name_is_prunable:
@@ -217,7 +219,12 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
 	def set_masks(self, masks):
 		"""Set the model's mask dictionary to a specified value."""
-		assert (masks.keys() == self.masks.keys()), "New mask keys must match existing PrunedTransformer mask keys"
+		new_mask_keys = set(masks.keys())
+		cur_mask_keys = set(self.masks.keys())
+		assert ((new_mask_keys.issubset(cur_mask_keys)), 
+				"new mask has keys that current mask doesn't: %s" % str(new_mask_keys.difference(cur_mask_keys)))
+		if new_mask_keys != cur_mask_keys:
+			print("Current mask has following keys that new mask doesn't: " + str(cur_mask_keys.difference(new_mask_keys)))
 		for mask_name in masks:
 			if self.args.cpu:
 				self.masks[mask_name] = torch.BoolTensor(masks[mask_name])
@@ -282,9 +289,8 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 
 		weight_vec = np.concatenate([v[current_mask[k] == 1] for k, v in weights.items()])
 		threshold = np.sort(np.abs(weight_vec))[n_weights_to_prune]
-
 		new_mask = {k: np.where(np.abs(v) > threshold, current_mask[k], np.zeros_like(v))
-					for k, v in weights.items()}  
+					for k, v in weights.items()}
 
 		for mask_name in self.masks:
 			if self.args.cpu:
@@ -304,25 +310,27 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 		n_remaining_weights = np.sum([np.sum(v) for v in current_mask.values()])
 		n_weights_to_prune = np.ceil(n_remaining_weights * prune_frac).astype(int)
 
-		weights = {}
+		# random values we assign to all weights to determine if they'll be pruned
+		pseudoweights = {}
 		for name, param in self.encoder.named_parameters():
 			mask_name = PrunedTransformerModel.to_mask_name(name, True)
 			if mask_name in self.masks:
-				weights[mask_name] = param.cpu().detach().numpy()
-
+				pseudoweights[mask_name] = np.random.random(param.shape)
 		for name, param in self.decoder.named_parameters():
 			mask_name = PrunedTransformerModel.to_mask_name(name, False)
 			if mask_name in self.masks:
-				weights[mask_name] = param.cpu().detach().numpy()
+				pseudoweights[mask_name] = np.random.random(param.shape)
 
-		weight_vec = np.concatenate([v[current_mask[k] == 1] for k, v in weights.items()])
-		threshold = np.sort(np.abs(weight_vec))[n_weights_to_prune]
-
+		pseudoweight_vec = np.concatenate([v[current_mask[k] == 1] for k, v in pseudoweights.items()])
+		threshold = np.sort(np.abs(pseudoweight_vec))[n_weights_to_prune]
 		new_mask = {k: np.where(np.abs(v) > threshold, current_mask[k], np.zeros_like(v))
-					for k, v in weights.items()}  
+					for k, v in pseudoweights.items()}
 
 		for mask_name in self.masks:
-			self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
+			if self.args.cpu:
+				self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name])
+			else:
+				self.masks[mask_name] = torch.BoolTensor(new_mask[mask_name]).cuda()
 
 
 	def get_sparsity(self):
@@ -397,21 +405,43 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 		sparsities = {}
 		for name, param in self.encoder.named_parameters():
 			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=True)
-			param_count = np.prod(param.size())
 			if mask_name in self.masks:
-				pruned_count = (self.masks[mask_name] == 0).sum()
-				sparsities[mask_name] = 1.0*pruned_count / param_count
+				sparsities[mask_name] = self.get_layer_sparsity(mask_name)
+				# param_count = np.prod(param.size())
+				# pruned_count = (self.masks[mask_name] == 0).sum()
+				# sparsities[mask_name] = float(1.0*pruned_count / param_count)
 			else:
 				sparsities[mask_name] = 0.0
 		for name, param in self.decoder.named_parameters():
 			mask_name = PrunedTransformerModel.to_mask_name(name, is_encoder=False)
-			param_count = np.prod(param.size())
 			if mask_name in self.masks:
-				pruned_count = (self.masks[mask_name] == 0).sum()
-				sparsities[mask_name] = 1.0*pruned_count / param_count
+				sparsities[mask_name] = self.get_layer_sparsity(mask_name)
+				# param_count = np.prod(param.size())
+				# pruned_count = (self.masks[mask_name] == 0).sum()
+				# sparsities[mask_name] = float(1.0*pruned_count / param_count)
 			else:
 				sparsities[mask_name] = 0.0
 		return sparsities
+
+	def get_layer_sparsity(self, layer, num_heads=16):
+		if layer not in self.masks:
+			return 0.0
+		elif ('q_proj' not in layer and 'k_proj' not in layer 
+				and 'v_proj' not in layer) or ('weight' not in layer):
+			param_count = np.prod(self.masks[layer].shape)
+			pruned_count = (self.masks[layer] == 0).sum()
+			return float(1.0 * pruned_count / param_count)
+		else:
+			head_sparsities = []
+			embed_dim = self.masks[layer].shape[1]
+			head_size = embed_dim // num_heads
+			for h in range(num_heads):
+				head_mask = self.masks[layer][:, head_size*h : head_size*(h+1)]
+				param_count = np.prod(head_mask.shape)
+				pruned_count = (head_mask == 0).sum()
+				head_sparsities.append(float(1.0*pruned_count / param_count))
+			return head_sparsities
+
 
 
 	@staticmethod
@@ -495,6 +525,9 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
 							help='block size of quantization noise at training time')
 		parser.add_argument('--quant-noise-scalar', type=float, metavar='D', default=0,
 							help='scalar quantization noise and scalar quantization at training time')
+		# args for PrunedTransformer
+		parser.add_argument('--prune-embeddings', default=False, action='store_true',
+							help='prune embeddings weights in encoder/decoder')
 		# fmt: on
 
 	@classmethod

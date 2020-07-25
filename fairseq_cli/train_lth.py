@@ -12,6 +12,7 @@ import math
 import os
 import random
 import sys
+import time
 
 import numpy as np
 import torch
@@ -174,7 +175,7 @@ def learning_rate_rewinding(args, task, trainer):
     prune_frac = 0.2
 
     max_epoch = args.max_epoch or math.inf
-    lth_iter = 2 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    lth_iter = 0 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
     first_round = True
     while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
@@ -207,18 +208,25 @@ def learning_rate_rewinding(args, task, trainer):
             and epoch_itr.next_epoch_idx <= max_epoch
         ):
             # train for one epoch
+            t0 = time.time()
+            logger.info("Epoch training started")
             valid_losses, should_stop = train(args, trainer, task, epoch_itr, lth_iter)
+            logger.info("Epoch training completed: %.2fsec" % (time.time() - t0))
             if should_stop:
                 break
 
             # only use first validation loss to update the learning rate
             lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
+            t0 = time.time()
+            logger.info("Loading dataset for next epoch")
             epoch_itr = trainer.get_train_iterator(
                 epoch_itr.next_epoch_idx,
                 # sharded data: get train iterator for next epoch
                 load_dataset=(os.pathsep in getattr(args, 'data', '')),
             )
+            logger.info("Dataset loaded: %.2fsec" % (time.time() - t0))
+
         train_meter.stop()
         logger.info('done training IMP iteration {} in {:.1f} seconds'.format(lth_iter, train_meter.sum))
 
