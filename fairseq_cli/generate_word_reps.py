@@ -15,6 +15,7 @@ import sys
 import os
 
 import torch
+import numpy as np
 
 from fairseq import checkpoint_utils, options, tasks, utils
 from fairseq.data import encoders
@@ -114,6 +115,7 @@ def main(args):
     )
     model = models[0]
     model.cuda()
+    model.eval()
     # encoder = FairseqEncoder()
     # encoder = checkpoint_utils.load_pretrained_component_from_model(encoder, args.path)
     encoder = model.encoder
@@ -146,7 +148,7 @@ def main(args):
     logger.info('NOTE: hypothesis and token scores are output in base 2')
     logger.info('Type the input sentence and press return:')
     start_id = 0
-    encoder_reps = []
+    outputs = []
     for inputs in buffered_read(args.input, args.buffer_size):
         tokens, indices = make_tokens(inputs, task, encode_fn)
         for batch in make_batches(tokens, args, task, max_positions):
@@ -156,16 +158,20 @@ def main(args):
                 src_tokens = src_tokens.cuda()
                 src_lengths = src_lengths.cuda()
 
+            print(len(src_tokens))
+            print(len(src_lengths))
+
             enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=False)
-            final_reps = enc_outputs.encoder_out
+            encoder_data = [[output.encoder_out, output.encoder_out] for output in enc_outputs]
             final_reps = final_reps.transpose(0, 1)
+            print(final_reps.shape)
 
             for (i, id) in enumerate(batch.ids.tolist()):
                 encoder_reps.append((start_id + id, final_reps[i]))
         # update running id counter
         start_id += len(inputs)
     encoder_reps = sorted(encoder_reps, key=lambda x: x[0])
-    encoder_reps = torch.cat([x[1] for x in encoder_reps]).cpu().numpy()
+    encoder_reps = torch.cat([x[1] for x in encoder_reps]).cpu().detach().numpy()
     np.savez(outfile, encoder_reps)
 
 

@@ -58,8 +58,13 @@ class SubwordNMTBPE(object):
         i = 0
         for j in range(len(bpe_seq)):
             mapping_idxs.append(i)
-            if self.bpe_symbol not in bpe_seq[j]:
-                i += 1
+            if self.bpe_symbol.strip() in bpe_seq[j]:
+                continue
+            if j < len(bpe_seq) - 1 and bpe_seq[j+1] == '@@@':
+                continue
+            if j > 0 and bpe_seq[j-1] == '-@@':
+                continue
+            i += 1
         return self.bpe.process_line(line), mapping_idxs
 
     def decode(self, x: str) -> str:

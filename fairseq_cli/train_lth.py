@@ -175,7 +175,7 @@ def learning_rate_rewinding(args, task, trainer):
     prune_frac = 0.2
 
     max_epoch = args.max_epoch or math.inf
-    lth_iter = 0 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    lth_iter = 6 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
     first_round = True
     while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
@@ -233,7 +233,7 @@ def learning_rate_rewinding(args, task, trainer):
         # save this model
         fn = f'checkpoint_LTH{lth_iter}_epoch{epoch_itr.epoch}'
         fn = fn + ('_sparsity%.3f.pt' % trainer.get_model().get_sparsity()[2])
-        if not first_round: 
+        if lth_iter != 0: 
             checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, custom_filename=fn)
 
         # update mask by pruning, and apply mask
