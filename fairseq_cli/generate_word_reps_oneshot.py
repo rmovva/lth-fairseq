@@ -183,11 +183,6 @@ def main(args):
             src_tokens = src_tokens.cuda()
             src_lengths = src_lengths.cuda()
 
-        # print(src_tokens.shape)
-        # print(src_lengths.shape)
-        # print(src_tokens[-1])
-        # print(src_lengths)
-
         enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=False)
         # encoder_data = [output.encoder_out for output in enc_outputs]
         final_reps = enc_outputs.encoder_out # MaxTokens x Batch x Dim
@@ -202,7 +197,7 @@ def main(args):
     
     sentence_to_index = {}
     for (i, line) in enumerate(lines):
-        sentence_to_index[str(i)] = line
+        sentence_to_index[str(i)] = line.strip()
 
     outfile = '/raj-learn/data/precomputed_reps/wsj_sentences_all.hdf5'
     make_hdf5_file(sentence_to_index, encoder_reps, outfile)    

@@ -175,7 +175,7 @@ def learning_rate_rewinding(args, task, trainer):
     prune_frac = 0.2
 
     max_epoch = args.max_epoch or math.inf
-    lth_iter = 6 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    lth_iter = 0 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
     first_round = True
     while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
