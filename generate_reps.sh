@@ -4,5 +4,5 @@ python3 fairseq_cli/generate_word_reps_oneshot.py \
 --tokenizer moses \
 --bpe subword_nmt --bpe-codes /raj-learn/data/wmt16_en_de_bpe32k/bpe.32000 \
 --max-tokens 4000 \
---input /raj-learn/data/probing_task_data/ccg/ccg_sentences.txt
-
+--input /raj-learn/data/probing_task_data/coreference_resolution/coreference_resolution_sentences.txt \
+--outfile /raj-learn/data/precomputed_reps/LTH0/coreference_resolution_sentences.hdf5

@@ -18,6 +18,8 @@ import torch
 import numpy as np
 import h5py
 import json
+import re
+import time
 
 from fairseq import checkpoint_utils, options, tasks, utils
 from fairseq.data import encoders
@@ -55,12 +57,142 @@ def make_hdf5_file(sentence_to_index, vectors, output_file_path):
             dtype=h5py.special_dtype(vlen=str))
         sentence_index_dataset[0] = json.dumps(sentence_to_index)
 
+TWO_CHAR_JOINS = [('&apos;', 's'),
+                  ('\\', '*'),
+                  ('&apos;', 're'),
+                  ('&apos;', 've'),
+                  ('n', '&apos;t'),
+                  ('&apos;', 'm'),
+                  ('&apos;', 'll'),
+                  ('&apos;', 'd'),
+                  ('&apos;', 'S'),
+                  ('&apos;', 'RE'),
+                  ('&apos;', 'VE'),
+                  ('N', '&apos;T'),
+                  ('&apos;', 'M'),
+                  ('&apos;', 'LL'),
+                  ('&apos;', 'D'),
+                  ('Can', 'not'),
+                  ('Gim', 'me'),
+                  ('Gon', 'na'),
+                  ('Lem', 'me'),
+                  ('T', 'is'),
+                  ('T', 'was'),
+                  ('Wan', 'na'),
+                  ('can', 'not'),
+                  ('gim', 'me'),
+                  ('gon', 'na'),
+                  ('lem', 'me'),
+                  ('t', 'is'),
+                  ('t', 'was'),
+                  ('wan', 'na'),
+                 ]
+
+CASUAL_WORDS = [('%', 'eh'),
+                ('%', 'u@@'),
+                ('%', 'um'),
+                ('%', 'h@@'),
+                ('%', 'ah')
+               ]
+
+TWO_CHAR_JOINS += CASUAL_WORDS
+
+BRIDGE_CHARS = ['@', '_']
+
+ARITH_SYMBOLS = ['%', '+']
+
+def adjust_indices(line, encoded, idxs):
+    # Look for two-char sequences that should be joined
+    encoded = encoded.split(' ')
+    for i in range(0, len(encoded) - 1):
+        for seq in TWO_CHAR_JOINS:
+            if encoded[i] == seq[0] and encoded[i+1] == seq[1]:
+                for j in range(i+1, len(encoded)):
+                    idxs[j] = idxs[j] - 1
+
+    # Look for abbreviated proper nouns like "Va .", "Inc .", etc.
+    # Have to use some more complex logic to find BPE-split 
+    # proper nouns like 'C@@ ali@@ f .'
+    for i in range(0, len(encoded) - 2):
+        k = 1
+        while i+k < len(encoded) - 1 and idxs[i] == idxs[i+k]:
+            k += 1
+        if i+k >= len(encoded) - 1: break
+        if encoded[i][0].isupper() and encoded[i+k] == '.':
+            abbrev = ''.join(encoded[i : i+k]).replace('@@', '')
+            abbrev += '.'
+            if abbrev in line:
+                for j in range(i+k, len(encoded)):
+                    idxs[j] = idxs[j] - 1
+
+    # Handle characters joined by @, like in email addresses
+    for i in range(1, len(encoded) - 1):
+        if encoded[i] in BRIDGE_CHARS and idxs[i] == idxs[i-1] + 1 and idxs[i] == idxs[i+1] - 1:
+            string = encoded[i-1] + encoded[i] + encoded[i+1].replace('@@', '')
+            if string in line:
+                idxs[i] = idxs[i] - 1
+                for j in range(i+1, len(encoded)):
+                    idxs[j] = idxs[j] - 2
+
+    # # Handle % signs prepended to words %uh gets split as % uh, for example
+    # for i in range(len(encoded)):
+    #     if encoded[i] == '%':
+    #         if i != len(encoded) - 1:
+    #             k = 1
+    #             next_word = encoded[i+k]
+    #             while '@@' in encoded[i+k]:
+    #                 k += 1
+    #                 next_word += encoded[i+k]
+    #             next_word = next_word.replace('@@', '')
+    #             string = encoded[i] + next_word
+    #             print(string)
+    #             if string in line:
+    #                 for j in range(i+1, len(encoded)):
+    #                     idxs[j] = idxs[j] - 1
+
+    #         if i == 0:
+    #            continue
+    #         prev_word = encoded[i-1]
+    #         k = 2
+    #         while idxs[i-k] == idxs[i-1]:
+    #            prev_word = encoded[i-k] + prev_word
+    #            k -= 1
+    #         prev_word = prev_word.replace('@@', '')
+    #         prev_word = prev_word.replace(' ', '')
+    #         string = prev_word + encoded[i]
+    #         if string in line:
+    #             print(string)
+    #             for j in range(i, len(encoded)):
+    #                 idxs[j] = idxs[j] - 1
+
+    return idxs
+
+
+def make_string(encoded, indices):
+    encoded = encoded.split(' ')
+    i = 0
+    res = ""
+    while i < len(encoded):
+        res += encoded[i]
+        if i >= len(indices) - 1:
+            break
+        elif indices[i] == indices[i+1]:
+            i += 1
+            continue
+        else:
+            res += ' '
+            i += 1
+    res = res.replace('@@', '')
+    res = res.replace('&apos;', '\'')
+    return res
+
 
 def make_tokens(lines, task, encode_fn):
     encoded_inputs = []
     indices = []
     for src_str in lines:
         x, idxs = encode_fn(src_str)
+        idxs = adjust_indices(src_str, x, idxs)
         encoded_inputs.append(x)
         indices.append(idxs)
     tokens = [
@@ -69,16 +201,10 @@ def make_tokens(lines, task, encode_fn):
         ).long()
         for encoded_input in encoded_inputs
     ]
-    return tokens, indices
+    return tokens, indices, encoded_inputs
 
 
 def make_batches(tokens, args, task, max_positions):
-    # tokens = [
-    #     task.source_dictionary.encode_line(
-    #         encode_fn(src_str), add_if_not_exist=False
-    #     ).long()
-    #     for src_str in lines
-    # ]
     lengths = [t.numel() for t in tokens]
     itr = task.get_batch_iterator(
         dataset=task.build_dataset_for_inference(tokens, lengths),
@@ -101,7 +227,7 @@ def map_rep_to_sentence(rep, indices, token_length):
     tokenlength: value corresponding to how many tokens the encoded input is, w/o padding 
     '''
     # get rid of padding
-    rep = rep[-token_length :]
+    rep = rep[-token_length : -1]
     # number of tokens in sentence: max index + 1 in index tracker
     sentence_length = max(indices) + 1
 
@@ -121,6 +247,7 @@ def map_rep_to_sentence(rep, indices, token_length):
 
 
 def main(args):
+    t0 = time.time()
     utils.import_user_module(args)
 
     if args.max_tokens is None and args.max_sentences is None:
@@ -173,8 +300,25 @@ def main(args):
     outputs = []
     lines = open(args.input, 'r').readlines()
     print("Dataset size: %d sentences" % len(lines))
-    tokens, indices = make_tokens(lines, task, encode_fn)
-    n_batches = 0
+    tokens, indices, encoded_inputs = make_tokens(lines, task, encode_fn)
+    count_matched = 0
+    count_mismatched = 0
+    keep_lines = []
+    for (i, line) in enumerate(lines):
+        line = line.strip().split(' ')
+        if max(indices[i]) + 1 != len(line):
+            # res = make_string(encoded_inputs[i], indices[i])
+            # print(' '.join(line))
+            # print(res)
+            # print(encoded_inputs[i])
+            # print(indices[i])
+            count_mismatched += 1
+        else:
+            count_matched += 1
+            keep_lines.append(i)
+    keep_lines = set(keep_lines)
+    print('''%d sentences had matched tokenizations with space-splitting; 
+            %d did not and were discarded''' % (count_matched, count_mismatched))
     encoder_reps = {}
     for batch in make_batches(tokens, args, task, max_positions):
         src_tokens = batch.src_tokens
@@ -183,24 +327,32 @@ def main(args):
             src_tokens = src_tokens.cuda()
             src_lengths = src_lengths.cuda()
 
-        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=False)
-        # encoder_data = [output.encoder_out for output in enc_outputs]
-        final_reps = enc_outputs.encoder_out # MaxTokens x Batch x Dim
-        final_reps = final_reps.transpose(0, 1) # Batch x MaxTokens x Dim
+        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=True)
+        # final_reps = enc_outputs.encoder_out # MaxTokens x Batch x Dim
+        # final_reps = final_reps.transpose(0, 1) # Batch x MaxTokens x Dim
+        encoder_states = enc_outputs.encoder_states # List[MaxTokens x Batch x Dim]
+        for k in range(len(encoder_states)):
+            encoder_states[k] = encoder_states[k].transpose(0, 1) # List[Batch x MaxTokens x Dim]
 
         for (i, id) in enumerate(batch.ids.tolist()):
-            mapped_rep = map_rep_to_sentence(final_reps[i].cpu().detach().numpy(), 
-                                             indices[id],
-                                             src_lengths[i])
-            encoder_reps[id] = mapped_rep
-        n_batches += 1
+            if id not in keep_lines:
+                continue
+            mapped_reps = []
+            for k in range(len(encoder_states)):
+                mapped_rep = map_rep_to_sentence(encoder_states[k][i].cpu().detach().numpy(), 
+                                                 indices[id],
+                                                 src_lengths[i])
+                mapped_reps.append(mapped_rep)
+            encoder_reps[id] = np.array(mapped_reps)
     
     sentence_to_index = {}
     for (i, line) in enumerate(lines):
-        sentence_to_index[str(i)] = line.strip()
+        if i not in keep_lines:
+            continue
+        sentence_to_index[line.strip()] = str(i)
 
-    outfile = '/raj-learn/data/precomputed_reps/wsj_sentences_all.hdf5'
-    make_hdf5_file(sentence_to_index, encoder_reps, outfile)    
+    make_hdf5_file(sentence_to_index, encoder_reps, args.outfile)
+    print("Precomputing reps took %.2fsec" % (time.time() - t0))
 
 
 def cli_main():
