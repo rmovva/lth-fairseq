@@ -1,7 +1,7 @@
 #!/bin/bash
-inputpath=/raj-learn/data/probing_task_data/coreference_resolution/coreference_resolution_sentences.txt
-outname=coref_v1_sentences.hdf5
-for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6
+inputpath=/raj-learn/data/probing_task_data/event_factuality/it-happened_sentences.txt
+outname=eventfactuality_sentences.hdf5
+for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7
 do
     echo $str
     if [ ! -d /raj-learn/data/precomputed_reps/$str ]; then
@@ -20,6 +20,7 @@ do
     --tokenizer moses \
     --bpe subword_nmt --bpe-codes /raj-learn/data/wmt16_en_de_bpe32k/bpe.32000 \
     --max-tokens 4000 \
+    --skip-invalid-size-inputs-valid-test \
     --input $inputpath \
     --outfile /raj-learn/data/precomputed_reps/$str/$outname
 done

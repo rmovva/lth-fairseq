@@ -4,7 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 """
-Computes encoder token representations for sentences in a given file.
+Computes attention distributions for sentences in a given file.
 Writes to hdf5.
 """
 
@@ -258,6 +258,54 @@ def map_rep_to_sentence(rep, indices, token_length):
     return sentence_rep
 
 
+def map_probs(p, indices):
+    '''
+    INPUT
+    p_tok (n_tokens): attention to each of the tokens
+    indices (n_tokens): for each token, give index of word it corresponds to
+    OUTPUT
+    p_word (n_words): attention to each of the words
+    '''
+    sentence_length = max(indices) + 1
+    p_word = np.zeros(sentence_length, dtype=np.float32)
+    for i in range(sentence_length):
+        p_word[i] == np.sum(p_tok[indices == i])
+
+
+
+def detokenize_attn(attn, indices, token_length):
+    '''
+    rep: MaxTokens x Dim
+    attn: Heads x Tokens x Tokens
+    indices: index mapping each token to a word index in the original sentence
+    tokenlength: value corresponding to how many tokens the encoded input is, w/o padding 
+    '''
+    # get rid of padding
+    attn = attn[:, -token_length : , -token_length : ]
+    # number of tokens in the sentence as tokenized by whatever dataset we are using
+    sentence_length = max(indices) + 1
+
+    sentence_attn = np.zeros((attn.shape[0], sentence_length, sentence_length), dtype=np.float32)
+    for (i, sent_idx) in enumerate(indices):
+        # sentence_attn[:, i]
+        continue
+
+
+
+    count_tokens_per_idx = {}
+    for (i, map_idx) in enumerate(indices):
+        sentence_rep[map_idx] += rep[i]
+        if map_idx not in count_tokens_per_idx:
+            count_tokens_per_idx[map_idx] = 0
+        count_tokens_per_idx[map_idx] += 1
+
+    # normalize for number of subtokens per word; i.e. take mean over BPE subtoken representations
+    for map_idx in count_tokens_per_idx:
+        sentence_rep[map_idx] *= (1.0 / count_tokens_per_idx[map_idx])
+
+    return sentence_rep
+
+
 def main(args):
     t0 = time.time()
     utils.import_user_module(args)
@@ -309,8 +357,10 @@ def main(args):
         *[model.max_positions()]
     )
 
-    outputs = []
-    lines = open(args.input, 'r').readlines()
+    # lines = open(args.input, 'r').readlines()
+    lines = ["Bob went to the supermarket . He did n't know where it was .",
+             # "I have never listened to that kind of music before ."
+             ]
     print("Dataset size: %d sentences" % len(lines))
     tokens, indices, encoded_inputs = make_tokens(lines, task, encode_fn)
     count_matched = 0
@@ -329,6 +379,9 @@ def main(args):
         elif len(line) > 1024:
             count_toolong += 1
         else:
+            print(line)
+            print(encoded_inputs[i].split(' '))
+            print(indices[i])
             count_matched += 1
             keep_lines.append(i)
     keep_lines = set(keep_lines)
@@ -343,32 +396,34 @@ def main(args):
             src_tokens = src_tokens.cuda()
             src_lengths = src_lengths.cuda()
 
-        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=True)
-        # final_reps = enc_outputs.encoder_out # MaxTokens x Batch x Dim
-        # final_reps = final_reps.transpose(0, 1) # Batch x MaxTokens x Dim
-        encoder_states = enc_outputs.encoder_states # List[MaxTokens x Batch x Dim]
-        for k in range(len(encoder_states)):
-            encoder_states[k] = encoder_states[k].transpose(0, 1) # List[Batch x MaxTokens x Dim]
+        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=False, return_all_attns=True)
+        enc_self_attns = enc_outputs.encoder_self_attns # List[Batch x Heads x Tokens x Tokens]
 
-        for (i, id) in enumerate(batch.ids.tolist()):
-            if id not in keep_lines:
-                continue
-            mapped_reps = []
-            for k in range(len(encoder_states)):
-                mapped_rep = map_rep_to_sentence(encoder_states[k][i].cpu().detach().numpy(), 
-                                                 indices[id],
-                                                 src_lengths[i])
-                mapped_reps.append(mapped_rep)
-            encoder_reps[id] = np.array(mapped_reps)
+        for i in range(len(enc_self_attns)):
+            print(enc_self_attns[i].shape)
+            if i==5:
+                print(enc_self_attns[i][0])
+                print(enc_self_attns[i][1])
+
+        # for (i, id) in enumerate(batch.ids.tolist()):
+        #     if id not in keep_lines:
+        #         continue
+        #     mapped_reps = []
+        #     for k in range(len(enc_self_attns)):
+        #         mapped_rep = map_rep_to_sentence(encoder_states[k][i].cpu().detach().numpy(), 
+        #                                          indices[id],
+        #                                          src_lengths[i])
+        #         mapped_reps.append(mapped_rep)
+        #     encoder_reps[id] = np.array(mapped_reps)
     
-    sentence_to_index = {}
-    for (i, line) in enumerate(lines):
-        if i not in keep_lines:
-            continue
-        sentence_to_index[line.strip()] = str(i)
+    # sentence_to_index = {}
+    # for (i, line) in enumerate(lines):
+    #     if i not in keep_lines:
+    #         continue
+    #     sentence_to_index[line.strip()] = str(i)
 
-    make_hdf5_file(sentence_to_index, encoder_reps, args.outfile)
-    print("Precomputing reps took %.2fsec" % (time.time() - t0))
+    # make_hdf5_file(sentence_to_index, encoder_reps, args.outfile)
+    # print("Precomputing reps took %.2fsec" % (time.time() - t0))
 
 
 def cli_main():

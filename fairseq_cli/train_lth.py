@@ -175,7 +175,7 @@ def learning_rate_rewinding(args, task, trainer):
     prune_frac = 0.2
 
     max_epoch = args.max_epoch or math.inf
-    lth_iter = 0 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    lth_iter = 7 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
     first_round = True
     while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
@@ -186,13 +186,14 @@ def learning_rate_rewinding(args, task, trainer):
             # rewind the model's update count to halfway through training
             # this will also set the learning rate to the value at halfway through train
             cur_update_count = trainer.get_num_updates()
-            rewind_update = int(0.5*cur_update_count)
+            rewind_frac = 0.2 if lth_iter >= 7 else 0.5
+            rewind_update = int(rewind_frac * cur_update_count)
             trainer.set_num_updates(rewind_update)
             logger.info('Rewound update count to %d' % rewind_update)
             
             # set epoch number to halfway point
             # reset_epoch = max_epoch // 2 if max_epoch is not math.inf else 1
-            reset_epoch = int(0.5*max_epoch) if max_epoch is not math.inf else 1
+            reset_epoch = int(rewind_frac*max_epoch) if max_epoch is not math.inf else 1
             epoch_itr = trainer.get_train_iterator(epoch=reset_epoch, load_dataset=True)
 
         logger.info('iterative LR rewinding training iteration {}; current sparsity: {}'.format(
@@ -233,7 +234,8 @@ def learning_rate_rewinding(args, task, trainer):
         # save this model
         fn = f'checkpoint_LTH{lth_iter}_epoch{epoch_itr.epoch}'
         fn = fn + ('_sparsity%.3f.pt' % trainer.get_model().get_sparsity()[2])
-        if lth_iter != 0: 
+        #if lth_iter != 0:
+        if not first_round:
             checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, custom_filename=fn)
 
         # update mask by pruning, and apply mask
