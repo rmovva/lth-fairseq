@@ -842,11 +842,17 @@ class TransformerEncoder(FairseqEncoder):
 			for idx, state in enumerate(encoder_states):
 				encoder_states[idx] = state.index_select(1, new_order)
 
+		encoder_self_attns = encoder_out.encoder_self_attns
+		if encoder_self_attns is not None:
+			for idx, attn in enumerate(encoder_self_attns):
+				encoder_self_attns[idx] = attn.index_select(0, new_order)
+
 		return EncoderOut(
 			encoder_out=new_encoder_out["encoder_out"],  # T x B x C
 			encoder_padding_mask=new_encoder_out["encoder_padding_mask"],  # B x T
 			encoder_embedding=new_encoder_out["encoder_embedding"],  # B x T x C
 			encoder_states=encoder_states,  # List[T x B x C]
+			encoder_self_attns=encoder_self_attns, # List[B x Heads x T x T]
 			src_tokens=src_tokens,  # B x T
 			src_lengths=src_lengths,  # B x 1
 		)

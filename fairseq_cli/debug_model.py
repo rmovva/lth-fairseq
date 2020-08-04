@@ -96,7 +96,10 @@ def main(args, init_distributed=False):
              'checkpoint_LTH2_epoch60_sparsity0.302.pt',
              'checkpoint_LTH3_epoch60_sparsity0.410.pt',
              'checkpoint_LTH4_epoch60_sparsity0.496.pt',
-             'checkpoint_LTH5_epoch60_sparsity0.565.pt'
+             'checkpoint_LTH5_epoch60_sparsity0.565.pt',
+             'checkpoint_LTH6_epoch60_sparsity0.620.pt',
+             'checkpoint_LTH7_epoch60_sparsity0.664.pt',
+             'checkpoint_LTH8_epoch60_sparsity0.699.pt',
              ]
 
     # fn = 'checkpoint_LTH0_epoch60.pt'

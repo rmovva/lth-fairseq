@@ -231,7 +231,7 @@ def learning_rate_rewinding(args, task, trainer):
         logger.info('done training IMP iteration {} in {:.1f} seconds'.format(lth_iter, train_meter.sum))
 
         # save this model
-        fn = f'checkpoint_LTH{lth_iter}_epoch{epoch_itr.epoch}'
+        fn = f'checkpoint_iter{lth_iter}_epoch{epoch_itr.epoch}'
         fn = fn + ('_sparsity%.3f.pt' % trainer.get_model().get_sparsity()[2])
         if lth_iter != 0: 
             checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, custom_filename=fn)
