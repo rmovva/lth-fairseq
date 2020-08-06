@@ -4,7 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 """
-Computes encoder token representations for sentences in a given file.
+Computes attention distributions for sentences in a given file.
 Writes to hdf5.
 """
 
@@ -258,6 +258,82 @@ def map_rep_to_sentence(rep, indices, token_length):
     return sentence_rep
 
 
+def detokenize_attn(attn, indices, token_length):
+    '''
+    attn: Heads x Tokens x Tokens
+    indices: index mapping each token to a word index in the original sentence
+    tokenlength: value corresponding to how many tokens the encoded input is, w/o padding 
+    '''
+    # for all tokens except EOS, how much p does it assign to EOS
+    eos_probs = attn[:, -token_length : -1, -1] 
+    # get rid of padding and EOS in token-token attn matrix
+    attn = attn[:, -token_length : -1, -token_length : -1]
+    # add EOS probs to final non-EOS token in attn matrix
+    attn[:, :, -1] += eos_probs 
+
+    # number of tokens in the sentence as tokenized by whatever dataset we are using
+    sentence_length = max(indices) + 1
+    token_ranges_per_word = {word_idx : [0, 0] for word_idx in range(sentence_length)}
+    i = 0
+    word_idx = 0
+    while i < len(indices):
+        start = i
+        token_ranges_per_word[word_idx][0] = start
+        while i < len(indices) and indices[i] == indices[start]:
+            i = i+1
+        token_ranges_per_word[word_idx][1] = i
+        word_idx += 1
+
+    sentence_attn = np.zeros((attn.shape[0], sentence_length, sentence_length), dtype=np.float32)
+    for i in range(sentence_length):
+        for j in range(sentence_length):
+            start_i, end_i = token_ranges_per_word[i]
+            start_j, end_j = token_ranges_per_word[j]
+            sentence_attn[:, i, j] += np.mean(np.sum(attn[:, start_i : end_i, start_j : end_j], axis=2), axis=1)
+
+    return sentence_attn
+
+
+def detokenize_attn_vectorized(attn, indices, token_length):
+    '''
+    attn: Heads x Tokens x Tokens
+    indices: index mapping each token to a word index in the original sentence
+    tokenlength: value corresponding to how many tokens the encoded input is, w/o padding 
+    RETURNS: (batch, sentence length, sentence length)
+    '''
+    # for all tokens except EOS, how much p does it assign to EOS
+    eos_probs = attn[:, -token_length : -1, -1] 
+    # get rid of padding and EOS in token-token attn matrix
+    attn = attn[:, -token_length : -1, -token_length : -1]
+    # # add EOS probs to final non-EOS token in attn matrix
+    attn[:, :, -1] += eos_probs 
+
+    # number of tokens in the sentence as tokenized by whatever dataset we are using
+    sentence_length = max(indices) + 1
+    token_ranges_per_word = {word_idx : [0, 0] for word_idx in range(sentence_length)}
+    i = 0
+    word_idx = 0
+    while i < len(indices):
+        start = i
+        token_ranges_per_word[word_idx][0] = start
+        while i < len(indices) and indices[i] == indices[start]:
+            i = i+1
+        token_ranges_per_word[word_idx][1] = i
+        word_idx += 1
+
+    summed_to_word_attn = np.zeros((attn.shape[0], attn.shape[1], sentence_length), dtype=np.float32)
+    for j in range(sentence_length):
+        start_j, end_j = token_ranges_per_word[j]
+        summed_to_word_attn[:, :, j] = np.sum(attn[:, :, start_j : end_j], axis=2)
+
+    sentence_attn = np.zeros((attn.shape[0], sentence_length, sentence_length), dtype=np.float32)
+    for i in range(sentence_length):
+        start_i, end_i = token_ranges_per_word[i]
+        sentence_attn[:, i, :] = np.mean(summed_to_word_attn[:, start_i : end_i, :], axis=1)
+
+    return sentence_attn
+
+
 def main(args):
     t0 = time.time()
     utils.import_user_module(args)
@@ -309,8 +385,7 @@ def main(args):
         *[model.max_positions()]
     )
 
-    outputs = []
-    lines = open(args.input, 'r').readlines()
+    lines = open(args.input, 'r').readlines()[:5000]
     print("Dataset size: %d sentences" % len(lines))
     tokens, indices, encoded_inputs = make_tokens(lines, task, encode_fn)
     count_matched = 0
@@ -329,13 +404,16 @@ def main(args):
         elif len(line) > 1024:
             count_toolong += 1
         else:
+            # print(line)
+            # print(encoded_inputs[i].split(' '))
+            # print(indices[i])
             count_matched += 1
             keep_lines.append(i)
     keep_lines = set(keep_lines)
     print('''%d sentences had matched tokenizations with space-splitting; 
             %d did not and %d were too long''' % (count_matched, count_mismatched, count_toolong))
     # sys.exit(0)
-    encoder_reps = {}
+    attention_maps = {}
     for batch in make_batches(tokens, args, task, max_positions):
         src_tokens = batch.src_tokens
         src_lengths = batch.src_lengths
@@ -343,32 +421,30 @@ def main(args):
             src_tokens = src_tokens.cuda()
             src_lengths = src_lengths.cuda()
 
-        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=True)
-        # final_reps = enc_outputs.encoder_out # MaxTokens x Batch x Dim
-        # final_reps = final_reps.transpose(0, 1) # Batch x MaxTokens x Dim
-        encoder_states = enc_outputs.encoder_states # List[MaxTokens x Batch x Dim]
-        for k in range(len(encoder_states)):
-            encoder_states[k] = encoder_states[k].transpose(0, 1) # List[Batch x MaxTokens x Dim]
+        enc_outputs = encoder.forward(src_tokens, src_lengths, return_all_hiddens=False, return_all_attns=True)
+        enc_self_attns = enc_outputs.encoder_self_attns # List[Batch x Heads x Tokens x Tokens]
 
         for (i, id) in enumerate(batch.ids.tolist()):
             if id not in keep_lines:
                 continue
-            mapped_reps = []
-            for k in range(len(encoder_states)):
-                mapped_rep = map_rep_to_sentence(encoder_states[k][i].cpu().detach().numpy(), 
-                                                 indices[id],
-                                                 src_lengths[i])
-                mapped_reps.append(mapped_rep)
-            encoder_reps[id] = np.array(mapped_reps)
+            layerwise_attn_maps = []
+            for k in range(len(enc_self_attns)):
+                detok_attn_map = detokenize_attn_vectorized(enc_self_attns[k][i].cpu().detach().numpy(), 
+                                                            indices[id],
+                                                            src_lengths[i])
+                layerwise_attn_maps.append(detok_attn_map)
+            attention_maps[id] = np.array(layerwise_attn_maps)
+    print("Precomputing attention maps took %.2fsec" % (time.time() - t0))
     
+    t0 = time.time()
     sentence_to_index = {}
     for (i, line) in enumerate(lines):
         if i not in keep_lines:
             continue
         sentence_to_index[line.strip()] = str(i)
 
-    make_hdf5_file(sentence_to_index, encoder_reps, args.outfile)
-    print("Precomputing reps took %.2fsec" % (time.time() - t0))
+    make_hdf5_file(sentence_to_index, attention_maps, args.outfile)
+    print("Writing attention maps to hdf5 took %.2fsec" % (time.time() - t0))
 
 
 def cli_main():

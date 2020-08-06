@@ -12,7 +12,7 @@ import math
 import os
 import random
 import sys
-import json
+import time
 
 import numpy as np
 import torch
@@ -64,9 +64,9 @@ def main(args, init_distributed=False):
     # Setup task, e.g., translation, language modeling, etc.
     task = tasks.setup_task(args)
 
-    # # Load valid dataset (we load training data below, based on the latest checkpoint)
-    # for valid_sub_split in args.valid_subset.split(','):
-    #     task.load_dataset(valid_sub_split, combine=False, epoch=1)
+    # Load valid dataset (we load training data below, based on the latest checkpoint)
+    for valid_sub_split in args.valid_subset.split(','):
+        task.load_dataset(valid_sub_split, combine=False, epoch=1)
 
     # Build model and criterion
     model = task.build_model(args)
@@ -78,9 +78,20 @@ def main(args, init_distributed=False):
         sum(p.numel() for p in model.parameters() if p.requires_grad),
     ))
 
+
+    # (optionally) Configure quantization
+    if args.quantization_config_path is not None:
+        quantizer = quantization_utils.Quantizer(
+            config_path=args.quantization_config_path,
+            max_epoch=args.max_epoch,
+            max_update=args.max_update,
+        )
+    else:
+        quantizer = None
+
     # Build trainer
     if args.model_parallel_size == 1:
-        trainer = Trainer(args, task, model, criterion, quantizer=None)
+        trainer = Trainer(args, task, model, criterion, quantizer)
     else:
         trainer = MegatronTrainer(args, task, model, criterion)
 
@@ -90,45 +101,11 @@ def main(args, init_distributed=False):
         args.max_sentences,
     ))
 
-    checkpoint_dir = '/raj-learn/checkpoints/lr-rewind_0.75sparsity_0.2frac_30epochs/'
-    files = ['checkpoint_LTH0_epoch60.pt',
-             'checkpoint_LTH1_epoch60_sparsity0.168.pt',
-             'checkpoint_LTH2_epoch60_sparsity0.302.pt',
-             'checkpoint_LTH3_epoch60_sparsity0.410.pt',
-             'checkpoint_LTH4_epoch60_sparsity0.496.pt',
-             'checkpoint_LTH5_epoch60_sparsity0.565.pt',
-             'checkpoint_LTH6_epoch60_sparsity0.620.pt',
-             'checkpoint_LTH7_epoch60_sparsity0.664.pt',
-             'checkpoint_LTH8_epoch60_sparsity0.699.pt',
-             ]
-
-    # fn = 'checkpoint_LTH0_epoch60.pt'
-    # trainer.load_checkpoint(os.path.join(checkpoint_dir, fn))
-    # model = trainer.get_model()
-
-
-    for fn in files:
-        trainer.load_checkpoint(os.path.join(checkpoint_dir, fn))
-        print("Mask sparsity")
-        print(trainer.get_model().get_sparsity())
-        print("Manual sparsity")
-        print(trainer.get_model().get_manual_sparsity())
-        
-        # sparsities = trainer.get_model().get_layerwise_sparsity()
-        # with open(f'./analysis/layer_sparsities/layerSparsities_{fn}.json', 'w') as outfile:
-        #    json.dump(sparsities, outfile)
-
-    # trainer.load_checkpoint(os.path.join(checkpoint_dir, 'checkpoint_LTH0_epoch60.pt'))
-    # trainer.get_model().random_prune(0.2)
-    # trainer.get_model().apply_masks()
-    # print(trainer.get_model().get_sparsity())
-    # print(trainer.get_model().get_manual_sparsity())
-    # trainer.get_model().random_prune(0.2)
-    # trainer.get_model().apply_masks()
-    # print(trainer.get_model().get_sparsity())
-    # print(trainer.get_model().get_manual_sparsity())
-
-    print("main() complete")
+    if args.lr_rewind:
+        learning_rate_rewinding(args, task, trainer)
+    else:
+        iterative_pruning_and_rewinding(args, task, trainer)
+    print("Finished training")
 
 
 def iterative_pruning_and_rewinding(args, task, trainer):
@@ -141,15 +118,15 @@ def iterative_pruning_and_rewinding(args, task, trainer):
     for itr in range(args.n_lth_iterations):
         logger.info('IMP training iteration {}; current sparsity: {}'.format(
             itr,
-            trainer.get_model().get_sparsity()
+            str(trainer.get_model().get_sparsity())
         ))
         # On first LTH iteration, load from latest checkpoint if available
         if itr == 0:
             extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
         if itr != 0:
             rewind_checkpoint = os.path.join(args.save_dir, 
-                                             'checkpoint10.pt')
-                                             # f'checkpoint_LTH{itr-1}_iter{args.lth_rewind_iter}.pt')
+            								 'checkpoint10.pt')
+            								 # f'checkpoint_LTH{itr-1}_iter{args.lth_rewind_iter}.pt')
             trainer.load_checkpoint(rewind_checkpoint,
                                     reset_optimizer=False,
                                     reset_lr_scheduler=False
@@ -185,7 +162,7 @@ def iterative_pruning_and_rewinding(args, task, trainer):
 
         # save this model
         checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
-                                         custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
+        								 custom_filename=f'checkpoint_LTH{itr}_epoch{epoch_itr.epoch}.pt')
 
         # update mask by pruning, and store new mask
         trainer.get_model().prune_weights(prune_frac)
@@ -194,18 +171,18 @@ def iterative_pruning_and_rewinding(args, task, trainer):
 
 def learning_rate_rewinding(args, task, trainer):
     # p = 1 - s^(1/n)
-    prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
+    # prune_frac = 1 - (1 - args.final_sparsity)**(1/args.n_lth_iterations)
+    prune_frac = 0.2
 
     max_epoch = args.max_epoch or math.inf
-    for lth_iter in range(args.n_lth_iterations):
-        logger.info('IMP training iteration {}; current sparsity: {}'.format(
-            lth_iter,
-            trainer.get_model().get_sparsity()
-        ))
+    lth_iter = 0 # because we are loading from checkpoint33.pt, which is already after 1 prune step.
+    first_round = True
+    while trainer.get_model().get_sparsity()[2] < args.final_sparsity:
         # On first LTH iteration, load from latest checkpoint if available
-        if lth_iter == 0:
+        if first_round:
+            # args.restore_file = os.path.join(args.save_dir, 'checkpoint_LTH0.pt')
             extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
-        if lth_iter != 0:
+        else:
             # rewind the model's update count to halfway through training
             # this will also set the learning rate to the value at halfway through train
             cur_update_count = trainer.get_num_updates()
@@ -214,8 +191,14 @@ def learning_rate_rewinding(args, task, trainer):
             logger.info('Rewound update count to %d' % rewind_update)
             
             # set epoch number to halfway point
-            reset_epoch = max_epoch // 2 if max_epoch is not math.inf else 1
+            # reset_epoch = max_epoch // 2 if max_epoch is not math.inf else 1
+            reset_epoch = int(0.5*max_epoch) if max_epoch is not math.inf else 1
             epoch_itr = trainer.get_train_iterator(epoch=reset_epoch, load_dataset=True)
+
+        logger.info('iterative LR rewinding training iteration {}; current sparsity: {}'.format(
+            lth_iter,
+            trainer.get_model().get_manual_sparsity()
+        ))
 
         lr = trainer.get_lr()
         train_meter = meters.StopwatchMeter()
@@ -224,33 +207,40 @@ def learning_rate_rewinding(args, task, trainer):
             lr > args.min_lr
             and epoch_itr.next_epoch_idx <= max_epoch
         ):
-            logger.info('epoch {}; current sparsity: {}'.format(
-                epoch_itr.epoch,
-                trainer.get_model().get_manual_sparsity()
-            ))
             # train for one epoch
-            valid_losses, should_stop = train(args, trainer, task, epoch_itr)
+            t0 = time.time()
+            logger.info("Epoch training started")
+            valid_losses, should_stop = train(args, trainer, task, epoch_itr, lth_iter)
+            logger.info("Epoch training completed: %.2fsec" % (time.time() - t0))
             if should_stop:
                 break
 
             # only use first validation loss to update the learning rate
             lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
+            t0 = time.time()
+            logger.info("Loading dataset for next epoch")
             epoch_itr = trainer.get_train_iterator(
                 epoch_itr.next_epoch_idx,
                 # sharded data: get train iterator for next epoch
                 load_dataset=(os.pathsep in getattr(args, 'data', '')),
             )
+            logger.info("Dataset loaded: %.2fsec" % (time.time() - t0))
+
         train_meter.stop()
         logger.info('done training IMP iteration {} in {:.1f} seconds'.format(lth_iter, train_meter.sum))
 
         # save this model
-        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, 
-                                         custom_filename=f'checkpoint_LTH{lth_iter}_epoch{epoch_itr.epoch}.pt')
+        fn = f'checkpoint_iter{lth_iter}_epoch{epoch_itr.epoch}'
+        fn = fn + ('_sparsity%.3f.pt' % trainer.get_model().get_sparsity()[2])
+        if lth_iter != 0: 
+            checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, None, custom_filename=fn)
 
         # update mask by pruning, and apply mask
-        trainer.get_model().prune_weights(prune_frac)
-        trainer.get_model().apply_masks()
+        trainer.get_model().random_prune(prune_frac)
+        trainer.get_model().apply_masks_grad_hooks()
+        lth_iter += 1
+        first_round = False
 
 
 def should_stop_early(args, valid_loss):
@@ -291,7 +281,7 @@ def tpu_data_loader(args, itr):
 
 
 @metrics.aggregate('train')
-def train(args, trainer, task, epoch_itr):
+def train(args, trainer, task, epoch_itr, lth_iter=None):
     """Train the model for one epoch and return validation losses."""
     # Initialize data iterator
     itr = epoch_itr.next_epoch_itr(
@@ -330,6 +320,8 @@ def train(args, trainer, task, epoch_itr):
         # log mid-epoch stats
         num_updates = trainer.get_num_updates()
         if num_updates % args.log_interval == 0:
+            s = trainer.get_model().get_manual_sparsity()
+            logger.info(f"Sparsity at {num_updates}: {s[2]}")
             stats = get_training_stats(metrics.get_smoothed_values('train_inner'))
             progress.log(stats, tag='train_inner', step=num_updates)
 
@@ -339,7 +331,7 @@ def train(args, trainer, task, epoch_itr):
 
         end_of_epoch = not itr.has_next()
         valid_losses, should_stop = validate_and_save(
-            args, trainer, task, epoch_itr, valid_subsets, end_of_epoch
+            args, trainer, task, epoch_itr, valid_subsets, end_of_epoch, lth_iter
         )
         if should_stop:
             break
@@ -353,7 +345,7 @@ def train(args, trainer, task, epoch_itr):
     return valid_losses, should_stop
 
 
-def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoch):
+def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoch, lth_iter=None):
     num_updates = trainer.get_num_updates()
     do_save = (
         (
@@ -385,7 +377,7 @@ def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoc
 
     # Save checkpoint
     if do_save or should_stop:
-        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, valid_losses[0])
+        checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, valid_losses[0], lth_iter=lth_iter)
 
     return valid_losses, should_stop
 

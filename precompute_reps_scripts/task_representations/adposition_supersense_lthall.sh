@@ -1,7 +1,7 @@
 #!/bin/bash
-inputpath=/raj-learn/data/probing_task_data/coreference_resolution/coreference_resolution_sentences.txt
-outname=coref_v1_sentences.hdf5
-for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6
+inputpath=/raj-learn/data/probing_task_data/adposition_supersenses/adposition_supersense_tagging_sentences.txt
+outname=adposition_supersense_sentences.hdf5
+for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7
 do
     echo $str
     if [ ! -d /raj-learn/data/precomputed_reps/$str ]; then

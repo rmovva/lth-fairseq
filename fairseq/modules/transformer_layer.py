@@ -113,12 +113,13 @@ class TransformerEncoderLayer(nn.Module):
         # TODO: to formally solve this problem, we need to change fairseq's
         # MultiheadAttention. We will do this later on.
 
-        x, _ = self.self_attn(
+        x, attn_head_weights = self.self_attn(
             query=x,
             key=x,
             value=x,
             key_padding_mask=encoder_padding_mask,
             attn_mask=attn_mask,
+            need_head_weights=True
         )
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
@@ -136,7 +137,7 @@ class TransformerEncoderLayer(nn.Module):
         x = residual + x
         if not self.normalize_before:
             x = self.final_layer_norm(x)
-        return x
+        return x, attn_head_weights
 
 
 class TransformerDecoderLayer(nn.Module):

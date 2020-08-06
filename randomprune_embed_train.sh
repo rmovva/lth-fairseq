@@ -1,7 +1,7 @@
 #!/bin/bash
-python fairseq_cli/train_lth.py /raid/data/wmt16_en_de_bpe32k/ \
+python fairseq_cli/train_lth_randomprune.py /raid/data/wmt16_en_de_bpe32k/ \
 	--save-dir /raid/checkpoints/ \
-	--restore-file /raid/checkpoints/checkpoint_LTH3_epoch40_sparsity0.49.pt \
+	--restore-file /raid/checkpoints/checkpoint_iter0_epoch60.pt \
 	--arch pruned_transformer_vaswani_wmt_en_de_big \
 	--share-all-embeddings \
 	--prune-embeddings \

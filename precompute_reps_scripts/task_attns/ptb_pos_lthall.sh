@@ -1,15 +1,15 @@
 #!/bin/bash
 inputpath=/raj-learn/data/probing_task_data/pos/wsj_sentences.txt
-outname=pos_wsj_sentences.hdf5
-for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6
+outname=ptb_pos_wsj_attention.hdf5
+for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7
 do
     echo $str
-    if [ ! -d /raj-learn/data/precomputed_reps/$str ]; then
-	newdir=/raj-learn/data/precomputed_reps/$str
+    if [ ! -d /raj-learn/data/precomputed_attns/$str ]; then
+	newdir=/raj-learn/data/precomputed_attns/$str
         mkdir $newdir
         echo 'created precomputed reps dir '$newdir
     fi
-    if [ -f /raj-learn/data/precomputed_reps/$str/$outname ]; then
+    if [ -f /raj-learn/data/precomputed_attns/$str/$outname ]; then
         echo 'already found precomputed reps file'
 	continue
     fi 
@@ -21,5 +21,5 @@ do
     --bpe subword_nmt --bpe-codes /raj-learn/data/wmt16_en_de_bpe32k/bpe.32000 \
     --max-tokens 4000 \
     --input $inputpath \
-    --outfile /raj-learn/data/precomputed_reps/$str/$outname
+    --outfile /raj-learn/data/precomputed_attns/$str/$outname
 done
