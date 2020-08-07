@@ -203,6 +203,7 @@ def make_tokens(lines, task, encode_fn):
     indices = []
     for src_str in lines:
         src_str = src_str.replace('’', '\'')
+        src_str = src_str.replace('COMMA', ',')
         x, idxs = encode_fn(src_str)
         idxs = adjust_indices(src_str, x, idxs)
         encoded_inputs.append(x)

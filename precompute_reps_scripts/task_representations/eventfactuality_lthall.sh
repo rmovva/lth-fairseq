@@ -1,7 +1,8 @@
 #!/bin/bash
 inputpath=/raj-learn/data/probing_task_data/event_factuality/it-happened_sentences.txt
 outname=eventfactuality_sentences.hdf5
-for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7
+#for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7
+for str in LTH8
 do
     echo $str
     if [ ! -d /raj-learn/data/precomputed_reps/$str ]; then
