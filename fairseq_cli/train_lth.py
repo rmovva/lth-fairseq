@@ -13,6 +13,7 @@ import os
 import random
 import sys
 import time
+import pickle
 
 import numpy as np
 import torch
@@ -41,6 +42,7 @@ logger = logging.getLogger('fairseq_cli.train')
 
 
 def main(args, init_distributed=False):
+    pickle.dump(args, open("argsfile.p", "wb"))
     utils.import_user_module(args)
 
     assert args.max_tokens is not None or args.max_sentences is not None, \

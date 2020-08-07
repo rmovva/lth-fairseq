@@ -253,6 +253,7 @@ class TransformerDecoderLayer(nn.Module):
         self_attn_padding_mask: Optional[torch.Tensor] = None,
         need_attn: bool = False,
         need_head_weights: bool = False,
+        get_all_attn: bool = False,
     ):
         """
         Args:
@@ -316,7 +317,9 @@ class TransformerDecoderLayer(nn.Module):
             incremental_state=incremental_state,
             need_weights=False,
             attn_mask=self_attn_mask,
+            need_head_weights=True,
         )
+        decdec_attn = attn
         x = F.dropout(x, p=self.dropout, training=self.training)
         x = residual + x
         if not self.normalize_before:
@@ -345,7 +348,7 @@ class TransformerDecoderLayer(nn.Module):
                 incremental_state=incremental_state,
                 static_kv=True,
                 need_weights=need_attn or (not self.training and self.need_attn),
-                need_head_weights=need_head_weights,
+                need_head_weights=True,
             )
             x = F.dropout(x, p=self.dropout, training=self.training)
             x = residual + x
@@ -374,8 +377,12 @@ class TransformerDecoderLayer(nn.Module):
                 ]
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
-            return x, attn, self_attn_state
-        return x, attn, None
+            if get_all_attn:
+                return x, attn, self_attn_state, decdec_attn
+            return x, attn, self_attn_state, None
+        if get_all_attn:
+            return x, attn, None, decdec_attn
+        return x, attn, None, None
 
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):
         self.need_attn = need_attn
