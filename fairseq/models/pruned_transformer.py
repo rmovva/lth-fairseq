@@ -423,6 +423,7 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                                 sparsities[mask_name] = 0.0
                 return sparsities
 
+
         def get_layer_sparsity(self, layer, num_heads=16):
                 if layer not in self.masks:
                         return 0.0
@@ -441,8 +442,6 @@ class PrunedTransformerModel(FairseqEncoderDecoderModel):
                                 pruned_count = (head_mask == 0).sum()
                                 head_sparsities.append(float(1.0*pruned_count / param_count))
                         return head_sparsities
-
-
 
         @staticmethod
         def add_args(parser):
