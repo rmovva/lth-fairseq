@@ -1,8 +1,8 @@
 #!/bin/bash
 inputpath=/raj-learn/data/probing_task_data/pos/wsj_sentences.txt
 outname=pos_wsj_sentences.hdf5
-#for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6
-for str in LTH7
+for str in LTH0 LTH1 LTH2 LTH3 LTH4 LTH5 LTH6 LTH7 LTH8
+#for str in LTH7
 do
     echo $str
     if [ ! -d /raj-learn/data/precomputed_reps/$str ]; then
